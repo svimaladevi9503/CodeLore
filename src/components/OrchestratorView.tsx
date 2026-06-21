@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Play, ChevronRight, ChevronDown, Layers, Terminal } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { ChevronRight, ChevronDown, Layers, Github, LogOut, FolderGit, Loader2, KeyRound } from "lucide-react";
 import { m, AnimatePresence } from "motion/react";
 
 const getAgentColor = (route: string) => {
@@ -37,6 +37,8 @@ interface OrchestratorViewProps {
     outcome: string;
     failed?: boolean;
   }>;
+  repoName: string;
+  setRepoName: (val: string) => void;
 }
 
 export default function OrchestratorView({
@@ -46,11 +48,68 @@ export default function OrchestratorView({
   setOrchEventType,
   dispatchOrchEvent,
   orchResult,
-  routingEvents
+  routingEvents,
+  repoName,
+  setRepoName
 }: OrchestratorViewProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  const [token, setToken] = useState(() => localStorage.getItem("github_token") || "");
+  const [inputToken, setInputToken] = useState("");
+  const [ghUser, setGhUser] = useState<{ login: string; avatar_url: string } | null>(null);
+  const [ghRepos, setGhRepos] = useState<Array<{ id: number; name: string; full_name: string }>>([]);
+  const [loadingGh, setLoadingGh] = useState(false);
+  const [errorGh, setErrorGh] = useState("");
 
+  const fetchGithubData = async (accessToken: string) => {
+    setLoadingGh(true);
+    setErrorGh("");
+    try {
+      const userRes = await fetch("https://api.github.com/user", {
+        headers: { Authorization: `token ${accessToken}` }
+      });
+      if (!userRes.ok) throw new Error("Invalid GitHub token");
+      const userData = await userRes.json();
+      
+      const reposRes = await fetch("https://api.github.com/user/repos?sort=updated&per_page=100", {
+        headers: { Authorization: `token ${accessToken}` }
+      });
+      if (!reposRes.ok) throw new Error("Failed to fetch repositories");
+      const reposData = await reposRes.json();
+
+      setGhUser({ login: userData.login, avatar_url: userData.avatar_url });
+      setGhRepos(reposData);
+      localStorage.setItem("github_token", accessToken);
+      setToken(accessToken);
+    } catch (err: any) {
+      setErrorGh(err.message || "GitHub authorization failed");
+      setGhUser(null);
+      setGhRepos([]);
+      localStorage.removeItem("github_token");
+      setToken("");
+    } finally {
+      setLoadingGh(false);
+    }
+  };
+
+  useEffect(() => {
+    if (token) {
+      fetchGithubData(token);
+    }
+  }, [token]);
+
+  const handleConnect = () => {
+    if (!inputToken.trim()) return;
+    fetchGithubData(inputToken.trim());
+  };
+
+  const handleDisconnect = () => {
+    localStorage.removeItem("github_token");
+    setToken("");
+    setGhUser(null);
+    setGhRepos([]);
+    setInputToken("");
+  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -74,53 +133,112 @@ export default function OrchestratorView({
         </p>
       </div>
 
-      {/* Event simulator playground card */}
-      <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-4 md:p-5 flex flex-col gap-4">
-        <h4 className="text-[14px] font-sans font-medium text-slate-300">
-          Sandbox event dispatcher
-        </h4>
+      {/* GitHub Repository Integration card */}
+      {!ghUser ? (
+        <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-4 md:p-5 flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <h4 className="text-[14px] font-sans font-medium text-slate-300 flex items-center gap-2">
+              <Github className="h-4 w-4 text-purple-400" />
+              <span>GitHub repository integration</span>
+            </h4>
+            <span className="text-[11px] font-mono text-slate-500">Authentication required</span>
+          </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="event-type-select" className="text-[12px] font-sans font-normal text-slate-400">Asserted event type</label>
-            <select
-              id="event-type-select"
-              value={orchEventType}
-              onChange={(e) => setOrchEventType(e.target.value)}
-              className="bg-slate-900 border border-slate-800 rounded-lg text-[12px] font-sans font-normal p-2.5 text-slate-200 outline-none focus:border-purple-500 transition cursor-pointer"
+          <div className="flex flex-col gap-3">
+            <p className="text-[12px] text-slate-400">
+              Connect your GitHub account to access your repositories. Use OAuth or enter a Personal Access Token manually.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <a
+                href="/api/github/login"
+                className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white px-4 py-2.5 rounded-lg font-sans text-[12px] font-medium cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 transition w-full sm:w-auto shadow-md shadow-purple-500/10"
+              >
+                <Github className="h-3.5 w-3.5" />
+                <span>Sign in with GitHub OAuth</span>
+              </a>
+
+              <div className="flex-1 flex gap-2">
+                <input
+                  type="password"
+                  placeholder="Or enter Personal Access Token..."
+                  value={inputToken}
+                  onChange={(e) => setInputToken(e.target.value)}
+                  className="flex-1 bg-slate-900 border border-slate-800 rounded-lg text-[12px] font-sans font-normal p-2.5 text-slate-200 outline-none focus:border-purple-500 transition placeholder-slate-600"
+                />
+                <button
+                  type="button"
+                  onClick={handleConnect}
+                  disabled={loadingGh}
+                  className="bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white px-4 py-2.5 rounded-lg font-sans text-[12px] font-medium cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 transition disabled:opacity-50 shadow-md shadow-teal-500/10"
+                >
+                  {loadingGh ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <KeyRound className="h-3.5 w-3.5" />
+                  )}
+                  <span>Connect</span>
+                </button>
+              </div>
+            </div>
+            {errorGh && (
+              <p className="text-[11px] text-red-400 mt-1 font-sans">{errorGh}</p>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-4 md:p-5 flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <h4 className="text-[14px] font-sans font-medium text-slate-300 flex items-center gap-2">
+              <Github className="h-4 w-4 text-purple-400" />
+              <span>GitHub repository integration</span>
+            </h4>
+            <button
+              type="button"
+              onClick={handleDisconnect}
+              className="text-slate-500 hover:text-red-450 transition flex items-center gap-1 text-[11px] font-sans cursor-pointer"
             >
-              <option value="unknown">Deterministic / Unknown (LLM decides)</option>
-              <option value="push">Simulated push commit (Docs Fast Route)</option>
-              <option value="chat_query">Natural language query (KB RAG Fast Route)</option>
-              <option value="scan">Code AST scan (Cleaner Fast Route)</option>
-            </select>
+              <LogOut className="h-3.5 w-3.5" />
+              <span>Disconnect</span>
+            </button>
           </div>
 
-          <div className="md:col-span-2 flex flex-col gap-1.5">
-            <label htmlFor="payload-input" className="text-[12px] font-sans font-normal text-slate-400">Event payload contents</label>
-            <input
-              id="payload-input"
-              type="text"
-              placeholder="e.g., 'Please check main repository file and scan for unused statements' or generic queries."
-              value={orchPayload}
-              onChange={(e) => setOrchPayload(e.target.value)}
-              aria-label="Event payload contents"
-              className="bg-slate-900 border border-slate-800 rounded-lg text-[12px] font-sans font-normal p-2.5 text-slate-200 outline-none focus:border-purple-500 transition placeholder-slate-600"
-            />
+          <div className="flex flex-col md:flex-row items-center md:justify-between gap-4 bg-slate-900/50 border border-slate-850 p-3 rounded-lg">
+            <div className="flex items-center gap-3 w-full md:w-auto">
+              <img
+                src={ghUser.avatar_url}
+                alt={ghUser.login}
+                className="w-9 h-9 rounded-full border border-purple-500/20"
+              />
+              <div className="flex flex-col">
+                <span className="text-[12px] font-sans font-medium text-slate-200">@{ghUser.login}</span>
+                <span className="text-[10px] font-mono text-slate-500">authenticated context</span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1 w-full md:w-[250px]">
+              <label htmlFor="repo-select" className="text-[10px] font-sans font-normal text-slate-400">Target repository</label>
+              <select
+                id="repo-select"
+                value={repoName}
+                onChange={(e) => setRepoName(e.target.value)}
+                className="bg-slate-950 border border-slate-800 rounded-lg text-[12px] font-sans font-normal p-2 text-slate-200 outline-none focus:border-purple-500 transition cursor-pointer"
+              >
+                <option value="" disabled>Select repository...</option>
+                {ghRepos.map((repo) => (
+                  <option key={repo.id} value={repo.name}>
+                    {repo.full_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="text-[11px] font-mono text-slate-500 pl-1 flex items-center gap-1.5">
+            <FolderGit className="h-3.5 w-3.5 text-teal-400" />
+            <span>Active context: <strong className="text-slate-300">{repoName || "None selected"}</strong></span>
           </div>
         </div>
-
-        <div className="flex justify-end pt-1">
-          <button
-            type="button"
-            onClick={dispatchOrchEvent}
-            className="bg-purple-500 hover:bg-purple-400 text-black px-4 py-2 rounded-lg font-sans text-[12px] font-medium cursor-pointer flex items-center gap-1.5 active:scale-95 transition"
-          >
-            <Play className="h-3.5 w-3.5 fill-current" />
-            <span>Dispatch to orchestrator</span>
-          </button>
-        </div>
-      </div>
+      )}
 
       {/* Live Routing Timeline */}
       <div className="flex flex-col gap-3">

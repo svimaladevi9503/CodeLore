@@ -637,35 +637,7 @@ export default function Sandbox() {
     historicDiffOverlay: null,
     selectedEventId: null,
     vaultOpenOnMobile: false,
-    routingEvents: [
-      {
-        id: "e1",
-        timestamp: "02:08:41",
-        eventType: "git commit",
-        payload: "fix: solve ast unused identifier scan loops dynamically",
-        route: "DOCUMENTATION HELPER",
-        confidence: 0.98,
-        outcome: "Readme draft written and registered in Parcle history successfully"
-      },
-      {
-        id: "e2",
-        timestamp: "01:54:12",
-        eventType: "chat query",
-        payload: "how do i configure the parcle storage memory adapter?",
-        route: "KNOWLEDGE BASE AGENT",
-        confidence: 0.95,
-        outcome: "Rag lookup returned high confidence answer with 2 cited source chunks"
-      },
-      {
-        id: "e3",
-        timestamp: "01:45:30",
-        eventType: "scan",
-        payload: "static ast integrity testing on server.ts",
-        route: "CLEANER AGENT",
-        confidence: 0.99,
-        outcome: "Ast scan resolved 2 unused identifiers and generated unified diff patch"
-      }
-    ]
+    routingEvents: []
   });
 
   const loading = useRef<boolean>(true);
@@ -734,6 +706,9 @@ export default function Sandbox() {
       const recRes = await fetch("/api/parcle/records");
       const recData = await recRes.json();
       dispatchUi({ type: "SET_PARCLE_DATA", value: recData.records });
+      if (recData.records && Array.isArray(recData.records.routing_events)) {
+        dispatchUi({ type: "SET_ROUTING_EVENTS", value: recData.records.routing_events });
+      }
     } catch (err) {
       console.error("Diagnostic grab error:", err);
     } finally {
@@ -758,25 +733,31 @@ export default function Sandbox() {
       const data = await res.json();
       dispatchOrch({ type: "SET_RESULT", value: data });
 
-      const isFailed = data.status === "failed";
-      const newEvent = {
-        id: `e_${Date.now()}`,
-        timestamp: new Date().toLocaleTimeString(),
-        eventType: orchState.eventType === "unknown" ? "ambiguous event" : orchState.eventType,
-        payload: orchState.payload || "Empty system payload details",
-        route: data.agent || "UNKNOWN",
-        confidence: data.result?.classification?.confidence ?? (isFailed ? 0.35 : 0.85),
-        outcome: data.status === "success" 
-          ? "Routed successfully to target specialist" 
-          : "Heuristic classification fallback resolved",
-        failed: isFailed
-      };
-      dispatchUi({
-        type: "SET_ROUTING_EVENTS",
-        value: (prev) => [newEvent, ...prev]
-      });
+      // Automatically sync UI state & switch tabs based on targeted specialist route
+      const targetAgent = data.agent || (data.classification && data.classification.route);
+      
+      if (targetAgent === "DOCUMENTATION HELPER" && data.status === "pending_approval" && data.result) {
+        dispatchDocHelper({ type: "SET_PENDING", value: data.result });
+        dispatchDocHelper({ type: "SET_DRAFT", value: data.result.newReadme });
+        dispatchDocHelper({ type: "SET_STAGE", value: "opening_pr" });
+        dispatchUi({ type: "SET_ACTIVE_TAB", value: "docs" });
+      } else if (targetAgent === "CLEANER AGENT" && data.status === "success" && data.result) {
+        dispatchCleaner({ type: "SET_SCANNED_ISSUES", value: data.result.issues });
+        dispatchUi({ type: "SET_ACTIVE_TAB", value: "cleaner" });
+      } else if (targetAgent === "KNOWLEDGE BASE AGENT" && data.status === "success" && data.result) {
+        dispatchKb({
+          type: "ADD_MESSAGE",
+          value: {
+            id: `msg_ans_${Date.now()}`,
+            role: "assistant",
+            content: data.result.answer,
+            sources: data.result.sources
+          }
+        });
+        dispatchUi({ type: "SET_ACTIVE_TAB", value: "kb" });
+      }
 
-      fetchDiagnostics();
+      await fetchDiagnostics();
     } catch (err) {
       console.error("Orchestrator failure:", err);
     }
@@ -1063,6 +1044,8 @@ export default function App() {
                     dispatchOrchEvent={dispatchOrchEvent}
                     orchResult={orchState.result}
                     routingEvents={uiState.routingEvents}
+                    repoName={docHelperState.repoName}
+                    setRepoName={(val) => dispatchDocHelper({ type: "SET_REPO", value: val })}
                   />
                 </m.div>
               )}

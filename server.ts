@@ -5,8 +5,17 @@ import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import { Pool } from "pg";
+import { exec, execSync } from "child_process";
 
 dotenv.config();
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,15 +42,17 @@ let parcleDb: {
   prs: Record<string, { url: string; sha: string; title: string; status: string; timestamp: string }>;
   v_store: Array<{ id: string; filename: string; section: string; content: string; embedding?: number[] }>;
   qa_logs: Array<{ query: string; answer: string; timestamp: string; sources: any[] }>;
-  clean_patches: Record<string, { file: string; patch: string; timestamp: string; applied: boolean }>;
+  clean_patches: Record<string, { file: string; patch: string; timestamp: string; applied: boolean; issues?: any[] }>;
   pipeline_runs: Array<{ id: string; name: string; status: string; timestamp: string; log: string }>;
+  routing_events: Array<{ id: string; timestamp: string; eventType: string; payload: string; route: string; confidence: number; outcome: string; failed?: boolean }>;
 } = {
   readmes: {},
   prs: {},
   v_store: [],
   qa_logs: [],
   clean_patches: {},
-  pipeline_runs: []
+  pipeline_runs: [],
+  routing_events: []
 };
 
 // Seed default documentation chunks for Knowledge Base Agent RAG
@@ -90,33 +101,315 @@ const DEFAULT_DOCS = [
   }
 ];
 
-function loadParcle() {
+async function initDb() {
+  if (!process.env.DATABASE_URL) {
+    console.warn("DATABASE_URL is missing. Operating in-memory only.");
+    return;
+  }
   try {
-    if (fs.existsSync(PARCLE_FILE_PATH)) {
-      const data = fs.readFileSync(PARCLE_FILE_PATH, 'utf-8');
-      parcleDb = JSON.parse(data);
-    } else {
-      parcleDb.v_store = [...DEFAULT_DOCS];
-      saveParcle();
-    }
+    const client = await pool.connect();
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS readmes (
+        key VARCHAR(255) PRIMARY KEY,
+        content TEXT,
+        timestamp VARCHAR(255),
+        sha VARCHAR(255),
+        author VARCHAR(255)
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS prs (
+        key VARCHAR(255) PRIMARY KEY,
+        url VARCHAR(255),
+        sha VARCHAR(255),
+        title VARCHAR(255),
+        status VARCHAR(255),
+        timestamp VARCHAR(255)
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS v_store (
+        id VARCHAR(255) PRIMARY KEY,
+        filename VARCHAR(255),
+        section VARCHAR(255),
+        content TEXT
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS qa_logs (
+        id SERIAL PRIMARY KEY,
+        query TEXT,
+        answer TEXT,
+        timestamp VARCHAR(255),
+        sources JSONB
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS clean_patches (
+        key VARCHAR(255) PRIMARY KEY,
+        file VARCHAR(255),
+        patch TEXT,
+        timestamp VARCHAR(255),
+        applied BOOLEAN
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS pipeline_runs (
+        id VARCHAR(255) PRIMARY KEY,
+        name VARCHAR(255),
+        status VARCHAR(255),
+        timestamp VARCHAR(255),
+        log TEXT
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS routing_events (
+        id VARCHAR(255) PRIMARY KEY,
+        timestamp VARCHAR(255),
+        event_type VARCHAR(255),
+        payload TEXT,
+        route VARCHAR(255),
+        confidence DOUBLE PRECISION,
+        outcome TEXT,
+        failed BOOLEAN
+      )
+    `);
+    client.release();
+    console.log("Neon database initialized and synced.");
   } catch (err) {
-    console.error("Failed to load Parcle, falling back to clean memory.", err);
-    parcleDb.v_store = [...DEFAULT_DOCS];
+    console.error("Neon database initialization failed", err);
   }
 }
 
-function saveParcle(): boolean {
+async function ensureParcleUser() {
+  if (!process.env.PARCLE_API_KEY) return;
+  try {
+    await fetch("https://api.parcle.ai/v1/users", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.PARCLE_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        user_id: "codelore-user",
+        name: "CodeLore Workspace User"
+      })
+    });
+  } catch (err) {
+    console.error("Failed to ensure Parcle user", err);
+  }
+}
+
+async function loadParcle() {
+  parcleDb.v_store = [...DEFAULT_DOCS];
+
+  if (!process.env.DATABASE_URL) {
+    try {
+      if (fs.existsSync(PARCLE_FILE_PATH)) {
+        const data = fs.readFileSync(PARCLE_FILE_PATH, 'utf-8');
+        parcleDb = JSON.parse(data);
+      } else {
+        await saveParcle();
+      }
+    } catch (err) {
+      console.error("Local Parcle read failed", err);
+    }
+    return;
+  }
+
+  try {
+    const client = await pool.connect();
+    
+    const readmesRes = await client.query("SELECT * FROM readmes");
+    parcleDb.readmes = {};
+    for (const row of readmesRes.rows) {
+      parcleDb.readmes[row.key] = {
+        content: row.content,
+        timestamp: row.timestamp,
+        sha: row.sha,
+        author: row.author
+      };
+    }
+
+    const prsRes = await client.query("SELECT * FROM prs");
+    parcleDb.prs = {};
+    for (const row of prsRes.rows) {
+      parcleDb.prs[row.key] = {
+        url: row.url,
+        sha: row.sha,
+        title: row.title,
+        status: row.status,
+        timestamp: row.timestamp
+      };
+    }
+
+    const vstoreRes = await client.query("SELECT * FROM v_store");
+    if (vstoreRes.rows.length > 0) {
+      parcleDb.v_store = vstoreRes.rows.map(row => ({
+        id: row.id,
+        filename: row.filename,
+        section: row.section,
+        content: row.content
+      }));
+    } else {
+      for (const doc of DEFAULT_DOCS) {
+        await client.query(
+          "INSERT INTO v_store (id, filename, section, content) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING",
+          [doc.id, doc.filename, doc.section, doc.content]
+        );
+      }
+    }
+
+    const qaRes = await client.query("SELECT * FROM qa_logs ORDER BY id DESC LIMIT 50");
+    parcleDb.qa_logs = qaRes.rows.map(row => ({
+      query: row.query,
+      answer: row.answer,
+      timestamp: row.timestamp,
+      sources: row.sources
+    }));
+
+    const patchesRes = await client.query("SELECT * FROM clean_patches");
+    parcleDb.clean_patches = {};
+    for (const row of patchesRes.rows) {
+      parcleDb.clean_patches[row.key] = {
+        file: row.file,
+        patch: row.patch,
+        timestamp: row.timestamp,
+        applied: row.applied
+      };
+    }
+
+    const runsRes = await client.query("SELECT * FROM pipeline_runs ORDER BY timestamp DESC LIMIT 50");
+    parcleDb.pipeline_runs = runsRes.rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      status: row.status,
+      timestamp: row.timestamp,
+      log: row.log
+    }));
+
+    const routingRes = await client.query("SELECT * FROM routing_events ORDER BY id DESC LIMIT 50");
+    parcleDb.routing_events = routingRes.rows.map(row => ({
+      id: row.id,
+      timestamp: row.timestamp,
+      eventType: row.event_type,
+      payload: row.payload,
+      route: row.route,
+      confidence: row.confidence,
+      outcome: row.outcome,
+      failed: row.failed
+    }));
+
+    client.release();
+    console.log("Loaded data from Neon successfully.");
+  } catch (err) {
+    console.error("Failed to load from Neon, falling back to memory.", err);
+  }
+}
+
+async function saveParcle(): Promise<boolean> {
   try {
     fs.writeFileSync(PARCLE_FILE_PATH, JSON.stringify(parcleDb, null, 2), "utf-8");
-    return true;
   } catch (err) {
     console.error("Local Parcle write fallback failed", err);
+  }
+
+  if (!process.env.DATABASE_URL) {
+    return true;
+  }
+
+  try {
+    const client = await pool.connect();
+    await client.query("BEGIN");
+
+    for (const [key, val] of Object.entries(parcleDb.readmes)) {
+      await client.query(
+        `INSERT INTO readmes (key, content, timestamp, sha, author) 
+         VALUES ($1, $2, $3, $4, $5) 
+         ON CONFLICT (key) DO UPDATE SET
+           content = EXCLUDED.content,
+           timestamp = EXCLUDED.timestamp,
+           sha = EXCLUDED.sha,
+           author = EXCLUDED.author`,
+        [key, val.content, val.timestamp, val.sha, val.author]
+      );
+    }
+
+    for (const [key, val] of Object.entries(parcleDb.prs)) {
+      await client.query(
+        `INSERT INTO prs (key, url, sha, title, status, timestamp) 
+         VALUES ($1, $2, $3, $4, $5, $6) 
+         ON CONFLICT (key) DO UPDATE SET 
+           url = EXCLUDED.url, 
+           sha = EXCLUDED.sha, 
+           title = EXCLUDED.title, 
+           status = EXCLUDED.status, 
+           timestamp = EXCLUDED.timestamp`,
+        [key, val.url, val.sha, val.title, val.status, val.timestamp]
+      );
+    }
+
+    await client.query("DELETE FROM v_store");
+    for (const doc of parcleDb.v_store) {
+      await client.query(
+        "INSERT INTO v_store (id, filename, section, content) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING",
+        [doc.id, doc.filename, doc.section, doc.content]
+      );
+    }
+
+    await client.query("DELETE FROM qa_logs");
+    for (const log of parcleDb.qa_logs) {
+      await client.query(
+        "INSERT INTO qa_logs (query, answer, timestamp, sources) VALUES ($1, $2, $3, $4)",
+        [log.query, log.answer, log.timestamp, JSON.stringify(log.sources)]
+      );
+    }
+
+    for (const [key, val] of Object.entries(parcleDb.clean_patches)) {
+      await client.query(
+        `INSERT INTO clean_patches (key, file, patch, timestamp, applied) 
+         VALUES ($1, $2, $3, $4, $5) 
+         ON CONFLICT (key) DO UPDATE SET 
+           applied = EXCLUDED.applied`,
+        [key, val.file, val.patch, val.timestamp, val.applied]
+      );
+    }
+
+    await client.query("DELETE FROM pipeline_runs");
+    for (const run of parcleDb.pipeline_runs) {
+      await client.query(
+        "INSERT INTO pipeline_runs (id, name, status, timestamp, log) VALUES ($1, $2, $3, $4, $5)",
+        [run.id, run.name, run.status, run.timestamp, run.log]
+      );
+    }
+
+    await client.query("DELETE FROM routing_events");
+    for (const ev of parcleDb.routing_events) {
+      await client.query(
+        "INSERT INTO routing_events (id, timestamp, event_type, payload, route, confidence, outcome, failed) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        [ev.id, ev.timestamp, ev.eventType, ev.payload, ev.route, ev.confidence, ev.outcome, ev.failed || false]
+      );
+    }
+
+    await client.query("COMMIT");
+    client.release();
+    return true;
+  } catch (err) {
+    console.error("Neon database save failed", err);
+    try {
+      const client = await pool.connect();
+      await client.query("ROLLBACK");
+      client.release();
+    } catch (e) {}
     return false;
   }
 }
 
-// Load Parcle at startup
-loadParcle();
+// Load Database and Parcle at startup
+(async () => {
+  await initDb();
+  await loadParcle();
+})();
 
 // Lazy Gemini API initialization
 let aiClient: any = null;
@@ -195,7 +488,8 @@ app.get("/api/sys-info", (req, res) => {
       v_store_size: parcleDb.v_store.length,
       qa_logs_count: parcleDb.qa_logs.length,
       patches_count: Object.keys(parcleDb.clean_patches).length,
-      pipeline_runs_count: parcleDb.pipeline_runs.length
+      pipeline_runs_count: parcleDb.pipeline_runs.length,
+      routing_events_count: parcleDb.routing_events.length
     }
   });
 });
@@ -208,31 +502,43 @@ app.get("/api/parcle/records", (req, res) => {
   });
 });
 
-// Run simulated pipeline test
+// Run real pipeline compiler verification
 app.post("/api/pipeline/run", (req, res) => {
   const { name = "Automated Standard Check" } = req.body;
   const id = "pipeline_" + Math.random().toString(36).substring(2, 9);
   const timestamp = new Date().toISOString();
   
-  // Create simulated testing log
-  const status = Math.random() > 0.05 ? "passed" : "failed";
-  const log = `[${timestamp}] Booting virtual testing framework...\n[${timestamp}] Running AST verification on ./src/\n[${timestamp}] Validating export modules\n[${timestamp}] Test suite compilation completes. Status: ${status.toUpperCase()}`;
+  exec("npm run lint", { cwd: process.cwd() }, async (error, stdout, stderr) => {
+    const status = error ? "failed" : "passed";
+    const log = `[${timestamp}] Booting testing framework...\n[${timestamp}] Running typescript compiler check (tsc --noEmit)...\n${stdout}\n${stderr}\n[${timestamp}] Test suite compilation completes. Status: ${status.toUpperCase()}`;
 
-  parcleDb.pipeline_runs.unshift({ id, name, status, timestamp, log });
-  saveParcle();
+    parcleDb.pipeline_runs.unshift({ id, name, status, timestamp, log });
+    await saveParcle();
 
-  res.json({
-    id,
-    name,
-    status,
-    timestamp,
-    log
+    res.json({
+      id,
+      name,
+      status,
+      timestamp,
+      log
+    });
   });
 });
 
 // Dynamic Code Cleaner AST Static Scan
-app.post("/api/clean/scan", (req, res) => {
-  let { code, filename = "App.tsx", scanWholeWorkspace = false } = req.body;
+async function performCleanScan(params: { code?: string; filename?: string; scanWholeWorkspace?: boolean; payload?: string }) {
+  let { code, filename = "App.tsx", scanWholeWorkspace = false, payload } = params;
+
+  if (!code && payload) {
+    const p = payload.toLowerCase();
+    if (p.includes("workspace") || p.includes("all files") || p.includes("project") || p.includes("repo") || p.includes("scan")) {
+      scanWholeWorkspace = true;
+    } else if (payload.includes("import") || payload.includes("const") || payload.includes("function") || payload.includes("class")) {
+      code = payload;
+    } else {
+      scanWholeWorkspace = true;
+    }
+  }
 
   let filesToScan: Array<{ name: string; content: string }> = [];
 
@@ -348,11 +654,12 @@ app.post("/api/clean/scan", (req, res) => {
     file: filename,
     patch: mockPatch || "No changes needed. Codebase is clean!",
     timestamp: new Date().toISOString(),
-    applied: false
+    applied: false,
+    issues: allIssues
   };
-  saveParcle();
+  await saveParcle();
 
-  res.json({
+  return {
     agent: "CLEANER AGENT",
     status: "success",
     result: {
@@ -364,25 +671,73 @@ app.post("/api/clean/scan", (req, res) => {
     parcle_write: "success",
     error: null,
     timestamp: new Date().toISOString()
-  });
+  };
+}
+
+app.post("/api/clean/scan", async (req, res) => {
+  try {
+    const result = await performCleanScan(req.body);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ status: "failed", error: err.message });
+  }
 });
 
-// Apply suggested patches from Cleaner Agent
-app.post("/api/clean/apply", (req, res) => {
+// Apply suggested patches from Cleaner Agent directly on the codebase
+app.post("/api/clean/apply", async (req, res) => {
   const { patchId } = req.body;
-  if (!parcleDb.clean_patches[patchId]) {
+  const patchData = parcleDb.clean_patches[patchId];
+  if (!patchData) {
     return res.status(404).json({ error: "Patch not found", status: "failed" });
   }
 
+  if (patchData.issues && patchData.issues.length > 0) {
+    try {
+      const filesToUpdate = new Map<string, any[]>();
+      for (const iss of patchData.issues) {
+        if (!filesToUpdate.has(iss.file)) {
+          filesToUpdate.set(iss.file, []);
+        }
+        filesToUpdate.get(iss.file)!.push(iss);
+      }
+
+      for (const [relPath, issues] of filesToUpdate.entries()) {
+        const absPath = path.isAbsolute(relPath) ? relPath : path.join(process.cwd(), relPath);
+        if (fs.existsSync(absPath)) {
+          let content = fs.readFileSync(absPath, "utf-8");
+          const lines = content.split("\n");
+          
+          issues.sort((a, b) => b.line - a.line);
+          
+          for (const iss of issues) {
+            const lineIdx = iss.line - 1;
+            if (lineIdx >= 0 && lineIdx < lines.length) {
+              if (iss.issue_type === "unused_import") {
+                lines[lineIdx] = `// Removed unused import: ${lines[lineIdx].trim()}`;
+              } else if (iss.issue_type === "unused_variable") {
+                lines[lineIdx] = `// Removed unused variable: ${lines[lineIdx].trim()}`;
+              }
+            }
+          }
+          
+          fs.writeFileSync(absPath, lines.join("\n"), "utf-8");
+        }
+      }
+    } catch (err) {
+      console.error("Patch application failed", err);
+      return res.status(500).json({ error: "Failed to apply patch on disk", status: "failed" });
+    }
+  }
+
   parcleDb.clean_patches[patchId].applied = true;
-  saveParcle();
+  await saveParcle();
 
   res.json({
     agent: "CLEANER AGENT",
     status: "success",
     result: {
       status: "applied",
-      msg: "Simulated patch applied successfully. System AST status updated."
+      msg: "Patch applied successfully. Modified files directly on disk."
     },
     parcle_write: "success"
   });
@@ -393,13 +748,14 @@ app.post("/api/clean/apply", (req, res) => {
 // -----------------------------------------------------------------------------
 
 // Triggers push command simulation
-app.post("/api/webhook", async (req, res) => {
-  const { commitHistory, repoName = "Repository", author = "quack-author", branch = "main" } = req.body;
+// Triggers push command simulation
+async function performWebhook(params: { commitHistory?: string; payload?: string; repoName?: string; author?: string; branch?: string }) {
+  const { commitHistory, payload, repoName = "Repository", author = "quack-author", branch = "main" } = params;
   const sha = Math.random().toString(36).substring(2, 10) + "df";
   const timestamp = new Date().toISOString();
 
   // Create artificial code commit summary or extraction
-  const diffStr = commitHistory || `diff --git a/src/App.tsx b/src/App.tsx\n--- a/src/App.tsx\n+++ b/src/App.tsx\n@@ -2,1 +2,2 @@\n-  return <div>Hello</div>;\n+  // Integrated automated tracking\n+  return <div>Hello Realtime Tracked Web app</div>;`;
+  const diffStr = commitHistory || payload || `diff --git a/src/App.tsx b/src/App.tsx\n--- a/src/App.tsx\n+++ b/src/App.tsx\n@@ -2,1 +2,2 @@\n-  return <div>Hello</div>;\n+  // Integrated automated tracking\n+  return <div>Hello Realtime Tracked Web app</div>;`;
 
   // Read current local README.md
   const readmeFilePath = path.join(process.cwd(), "README.md");
@@ -446,8 +802,7 @@ Generate the complete, updated format of README.md. Do not include extra convers
     updatedMarkdown = currentReadme + `\n\n## Update [Commit ${sha}]\nAutomated update triggered by web push. Modified files with change summary:\n\`\`\`\n${diffStr}\n\`\`\``;
   }
 
-  // Return to frontend for "Accept & Update" popup confirmation before modifying
-  res.json({
+  return {
     agent: "DOCUMENTATION HELPER",
     status: "pending_approval",
     result: {
@@ -459,11 +814,20 @@ Generate the complete, updated format of README.md. Do not include extra convers
       newReadme: updatedMarkdown,
       timestamp
     }
-  });
+  };
+}
+
+app.post("/api/webhook", async (req, res) => {
+  try {
+    const result = await performWebhook(req.body);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ status: "failed", error: err.message });
+  }
 });
 
 // Callback when user hits "Accept & Update" in frontend popup
-app.post("/api/approve-readme", (req, res) => {
+app.post("/api/approve-readme", async (req, res) => {
   const { sha, content, author = "quack-author", oldContent } = req.body;
   const timestamp = new Date().toISOString();
 
@@ -484,12 +848,32 @@ app.post("/api/approve-readme", (req, res) => {
     console.error("Write local README failed", err);
   }
 
-  // Generate GitHub simulated PR
+  // Real Git commit execution and URL resolving
+  let realPrUrl = `https://github.com/quack-author/CodeLore/commit/${sha}`;
+  try {
+    execSync("git add README.md", { cwd: process.cwd() });
+    const status = execSync("git status --porcelain README.md", { cwd: process.cwd() }).toString().trim();
+    if (status) {
+      execSync(`git commit -m "chore: synchronize system documentation [${sha.substring(0, 5)}]"`, { cwd: process.cwd() });
+      const commitSha = execSync("git rev-parse HEAD", { cwd: process.cwd() }).toString().trim();
+      let remoteUrl = "";
+      try {
+        remoteUrl = execSync("git config --get remote.origin.url", { cwd: process.cwd() }).toString().trim();
+      } catch (e) {}
+      if (remoteUrl) {
+        const cleanRemote = remoteUrl
+          .replace("git@github.com:", "https://github.com/")
+          .replace(".git", "");
+        realPrUrl = `${cleanRemote}/commit/${commitSha}`;
+      }
+    }
+  } catch (err) {
+    console.error("Local Git commit failed", err);
+  }
+
   const prId = `pr_${sha}`;
-  const prUrl = `https://github.com/Parcle-AI/automations/pull/${Math.floor(Math.random() * 900) + 100}`;
-  
   parcleDb.prs[prId] = {
-    url: prUrl,
+    url: realPrUrl,
     sha,
     title: `chore: synchronize system documentation [${sha.substring(0, 5)}]`,
     status: "merged",
@@ -514,13 +898,13 @@ app.post("/api/approve-readme", (req, res) => {
     }
   });
 
-  saveParcle();
+  await saveParcle();
 
   res.json({
     agent: "DOCUMENTATION HELPER",
     status: "success",
     result: {
-      pr_url: prUrl,
+      pr_url: realPrUrl,
       sha,
       backup_key: backupKey,
       indexed_chunks: sections.length
@@ -534,15 +918,84 @@ app.post("/api/approve-readme", (req, res) => {
 // KNOWLEDGE BASE AGENT RAG LOGIC
 // -----------------------------------------------------------------------------
 
-app.post("/api/rag/query", async (req, res) => {
-  const { query } = req.body;
+// KNOWLEDGE BASE AGENT RAG LOGIC
+async function performRagQuery(params: { query?: string; payload?: string }) {
+  const { query: rawQuery, payload } = params;
+  const query = rawQuery || payload;
   if (!query) {
-    return res.status(400).json({ error: "Missing query" });
+    throw new Error("Missing query");
   }
 
+  // Parcle API RAG Search
+  if (process.env.PARCLE_API_KEY) {
+    try {
+      await ensureParcleUser();
+      const response = await fetch("https://api.parcle.ai/v1/memories/search", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.PARCLE_API_KEY}`,
+          "Content-Type": "application/json",
+          "Accept": "text/event-stream"
+        },
+        body: JSON.stringify({
+          user_id: "codelore-user",
+          query: query
+        })
+      });
+
+      if (response.ok) {
+        const text = await response.text();
+        const lines = text.split("\n");
+        let dataObj: any = null;
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const parsed = JSON.parse(line.slice(6));
+              if (parsed.answer) {
+                dataObj = parsed;
+              }
+            } catch (e) {}
+          }
+        }
+
+        if (dataObj) {
+          const finalAnswer = dataObj.answer;
+          const sources = (dataObj.citations || []).map((cit: any) => ({
+            filename: cit.type === "session" ? "Dialog Session" : "Uploaded File",
+            section: cit.id,
+            relevance: dataObj.confidence || 1.0
+          }));
+
+          const timestamp = new Date().toISOString();
+          parcleDb.qa_logs.unshift({
+            query,
+            answer: finalAnswer,
+            timestamp,
+            sources
+          });
+          await saveParcle();
+
+          return {
+            agent: "KNOWLEDGE BASE AGENT",
+            status: "success",
+            result: {
+              answer: finalAnswer,
+              sources
+            },
+            parcle_write: "success",
+            timestamp
+          };
+        }
+      }
+    } catch (err) {
+      console.error("Parcle search failed, falling back to local scoring", err);
+    }
+  }
+
+  // Fallback to local overlap search if Parcle API key missing or query fails
   const chunks = parcleDb.v_store;
   if (chunks.length === 0) {
-    return res.json({
+    return {
       agent: "KNOWLEDGE BASE AGENT",
       status: "failed",
       result: {
@@ -550,10 +1003,9 @@ app.post("/api/rag/query", async (req, res) => {
         sources: []
       },
       parcle_write: "skipped"
-    });
+    };
   }
 
-  // Evaluate overlap scores for RAG retrieval
   const scoredChunks = chunks.map(chunk => {
     const score = computeTokenOverlap(query, `${chunk.section} ${chunk.content}`);
     return { chunk, score };
@@ -575,11 +1027,11 @@ app.post("/api/rag/query", async (req, res) => {
         const response = await ai.models.generateContent({
           model: "gemini-3.5-flash",
           contents: `You are the Knowledge Base Agent. Answer the user's technical question based EXACTLY on the relevant documentation chunks. Give a concise but highly professional response. Cite your sources clearly.
-
-Relevant documentation context:
-${contextStr}
-
-User Query: "${query}"`,
+ 
+ Relevant documentation context:
+ ${contextStr}
+ 
+ User Query: "${query}"`,
           config: {
             systemInstruction: "You are CodeLore Docs documentation helper. You use strict context retrieval to form cited answers."
           }
@@ -591,7 +1043,6 @@ User Query: "${query}"`,
     }
 
     if (!finalAnswer) {
-      // Offline smart fallback text builder
       finalAnswer = `Based on the Parcle vector chunks, I found relevant matches in **${topK[0].chunk.filename}** under the section **"${topK[0].chunk.section}"**. Here is the context:\n\n${topK[0].chunk.content}`;
     }
   }
@@ -601,11 +1052,11 @@ User Query: "${query}"`,
     query,
     answer: finalAnswer,
     timestamp,
-    sources: topK.map(item => ({ filename: item.chunk.filename, section: item.chunk.section, relevance: item.score.toFixed(2) }))
+    sources: topK.map(item => ({ filename: item.chunk.filename, section: item.chunk.section, relevance: Number(item.score.toFixed(2)) }))
   });
-  saveParcle();
+  await saveParcle();
 
-  res.json({
+  return {
     agent: "KNOWLEDGE BASE AGENT",
     status: "success",
     result: {
@@ -614,11 +1065,20 @@ User Query: "${query}"`,
     },
     parcle_write: "success",
     timestamp
-  });
+  };
+}
+
+app.post("/api/rag/query", async (req, res) => {
+  try {
+    const result = await performRagQuery(req.body);
+    res.json(result);
+  } catch (err: any) {
+    res.status(err.message === "Missing query" ? 400 : 500).json({ error: err.message });
+  }
 });
 
 // Custom Vector chunk addition
-app.post("/api/rag/add-chunk", (req, res) => {
+app.post("/api/rag/add-chunk", async (req, res) => {
   const { filename, section, content } = req.body;
   if (!filename || !section || !content) {
     return res.status(400).json({ error: "Missing required fields" });
@@ -626,7 +1086,36 @@ app.post("/api/rag/add-chunk", (req, res) => {
 
   const id = `chunk_custom_${Date.now()}`;
   parcleDb.v_store.push({ id, filename, section, content });
-  saveParcle();
+  await saveParcle();
+
+  // Ingest to Parcle Memory API
+  if (process.env.PARCLE_API_KEY) {
+    try {
+      await ensureParcleUser();
+      await fetch("https://api.parcle.ai/v1/memories/ingest_dialog", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.PARCLE_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          user_id: "codelore-user",
+          messages: [
+            {
+              role: "user",
+              content: `File: ${filename}\nSection: ${section}\nContent: ${content}`
+            }
+          ],
+          tag: {
+            filename,
+            section
+          }
+        })
+      });
+    } catch (err) {
+      console.error("Failed to ingest chunk to Parcle", err);
+    }
+  }
 
   res.json({
     status: "success",
@@ -695,43 +1184,195 @@ app.post("/api/orchestrate", async (req, res) => {
     });
   }
 
-  // Fast Routing check
+  let route = "UNKNOWN";
+  let confidence = 0.5;
+
+  // 1. Classification
   if (event_type === "push") {
-    // Route to documentation helper automatically
-    return res.redirect(307, "/api/webhook");
+    route = "DOCUMENTATION HELPER";
+    confidence = 1.0;
   } else if (event_type === "chat_query") {
-    // Route to Knowledge base
-    return res.redirect(307, "/api/rag/query");
+    route = "KNOWLEDGE BASE AGENT";
+    confidence = 1.0;
   } else if (event_type === "scan") {
-    // Route to static cleaner
-    return res.redirect(307, "/api/clean/scan");
+    route = "CLEANER AGENT";
+    confidence = 1.0;
   } else {
-    // Unknown or ambiguous event: Invoke dynamic routing module
+    // LLM classification
     const classification = await classifyIntentWithLLM(payload);
+    route = classification.route;
+    confidence = classification.confidence;
+  }
+
+  if (route === "UNKNOWN" || confidence < 0.7) {
+    const outcome = "Route failure due to low confidence classification";
+    const timestamp = new Date().toLocaleTimeString();
+    const eventId = `e_${Date.now()}`;
     
-    if (classification.confidence < 0.7) {
-      return res.json({
-        agent: "ORCHESTRATOR",
-        status: "partial",
-        result: {
-          classification,
-          requires_clarification: true,
-          clarification_message: `The Orchestrator mapped this request to '${classification.route}' with confidence ${classification.confidence.toFixed(2)}. This is below our 0.7 limit. Please clarify your specific intent.`
-        },
-        parcle_write: "skipped",
-        error: "low_confidence_route",
-        timestamp: new Date().toISOString()
-      });
+    const newEvent = {
+      id: eventId,
+      timestamp,
+      eventType: event_type === "unknown" ? "ambiguous event" : event_type,
+      payload,
+      route,
+      confidence,
+      outcome,
+      failed: true
+    };
+    
+    parcleDb.routing_events.unshift(newEvent);
+    await saveParcle();
+
+    return res.json({
+      agent: "ORCHESTRATOR",
+      status: "failed",
+      error: "low_confidence_route",
+      result: {
+        classification: { route, confidence },
+        requires_clarification: true,
+        clarification_message: `The Orchestrator mapped this request to '${route}' with confidence ${confidence.toFixed(2)}. This is below our 0.7 limit. Please clarify your specific intent.`
+      },
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  // 2. Invoke the corresponding agent operation
+  let agentResult: any;
+  let outcome = "";
+  try {
+    if (route === "DOCUMENTATION HELPER") {
+      agentResult = await performWebhook({ payload });
+      outcome = `Readme draft generated for commit SHA ${agentResult.result.sha.substring(0, 7)} pending approval.`;
+    } else if (route === "CLEANER AGENT") {
+      agentResult = await performCleanScan({ payload });
+      outcome = `AST scan completed. Found ${agentResult.result.issues_found} potential issues.`;
+    } else {
+      agentResult = await performRagQuery({ payload });
+      outcome = `RAG query processed successfully. Returned answer citing ${agentResult.result.sources.length} sources.`;
     }
 
-    // Direct routing based on LLM output
-    if (classification.route === "DOCUMENTATION HELPER") {
-      return res.redirect(307, "/api/webhook");
-    } else if (classification.route === "CLEANER AGENT") {
-      return res.redirect(307, "/api/clean/scan");
-    } else {
-      return res.redirect(307, "/api/rag/query");
+    const timestamp = new Date().toLocaleTimeString();
+    const eventId = `e_${Date.now()}`;
+    
+    const newEvent = {
+      id: eventId,
+      timestamp,
+      eventType: event_type === "unknown" ? "ambiguous event" : event_type,
+      payload,
+      route,
+      confidence,
+      outcome,
+      failed: false
+    };
+
+    parcleDb.routing_events.unshift(newEvent);
+    await saveParcle();
+
+    // Return the agent's exact response structure but attach the classification
+    return res.json({
+      ...agentResult,
+      classification: { route, confidence }
+    });
+  } catch (err: any) {
+    console.error("Orchestrator invocation failed:", err);
+    const timestamp = new Date().toLocaleTimeString();
+    const eventId = `e_${Date.now()}`;
+    const newEvent = {
+      id: eventId,
+      timestamp,
+      eventType: event_type === "unknown" ? "ambiguous event" : event_type,
+      payload,
+      route,
+      confidence,
+      outcome: `Error: ${err.message}`,
+      failed: true
+    };
+    parcleDb.routing_events.unshift(newEvent);
+    await saveParcle();
+
+    return res.status(500).json({
+      agent: "ORCHESTRATOR",
+      status: "failed",
+      error: err.message,
+      classification: { route, confidence }
+    });
+  }
+});
+
+app.get("/api/orchestrate/events", (req, res) => {
+  res.json({
+    status: "success",
+    events: parcleDb.routing_events
+  });
+});
+
+app.get("/api/github/login", (req, res) => {
+  const clientId = process.env.GITHUB_CLIENT_ID;
+  if (!clientId) {
+    return res.status(500).send("GITHUB_CLIENT_ID is not configured in the environment.");
+  }
+  const appUrl = process.env.APP_URL || `http://localhost:${PORT}`;
+  const redirectUri = `${appUrl}/api/github/callback`;
+  const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=repo,user`;
+  res.redirect(githubAuthUrl);
+});
+
+app.get("/api/github/callback", async (req, res) => {
+  const { code } = req.query;
+  if (!code) {
+    return res.status(400).send("Missing authorization code.");
+  }
+
+  const clientId = process.env.GITHUB_CLIENT_ID;
+  const clientSecret = process.env.GITHUB_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    return res.status(500).send("GitHub client ID or secret is not configured.");
+  }
+
+  try {
+    const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code
+      })
+    });
+
+    const tokenData = await tokenRes.json();
+    if (tokenData.error) {
+      return res.status(400).send(`GitHub OAuth exchange error: ${tokenData.error_description || tokenData.error}`);
     }
+
+    const accessToken = tokenData.access_token;
+    if (!accessToken) {
+      return res.status(400).send("Failed to retrieve access token from GitHub.");
+    }
+
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head><title>GitHub Authentication Success</title></head>
+        <body style="background:#090d16;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;">
+          <div style="text-align:center;">
+            <p style="font-size:14px;margin-bottom:8px;">Authentication successful!</p>
+            <p style="font-size:12px;color:#64748b;">Closing flow context...</p>
+          </div>
+          <script>
+            localStorage.setItem("github_token", "${accessToken}");
+            window.location.href = "/";
+          </script>
+        </body>
+      </html>
+    `);
+  } catch (err: any) {
+    console.error("OAuth exchange failed:", err);
+    res.status(500).send(`OAuth callback error: ${err.message}`);
   }
 });
 
