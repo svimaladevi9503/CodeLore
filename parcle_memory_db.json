@@ -1,0 +1,51 @@
+{
+  "readmes": {},
+  "prs": {},
+  "v_store": [
+    {
+      "id": "doc_1",
+      "filename": "README.md",
+      "section": "Overview",
+      "content": "# CodeLore\nA Workspace lens to help your code and documentations self sustaining, powered by Parcle memory and deployed on Enter."
+    },
+    {
+      "id": "doc_2",
+      "filename": "README.md",
+      "section": "Setup & Installation",
+      "content": "## Setup\nTo install dependencies run `npm install`.\nConfiguration is managed via `.env` with variables `GEMINI_API_KEY` and `APP_URL`.\nRun `npm run dev` to start the CodeLore Docs agent control panel on port 3000."
+    },
+    {
+      "id": "doc_3",
+      "filename": "parcle_memory_api.md",
+      "section": "What is Parcle Memory?",
+      "content": "Parcle Memory is a high-performance vector and key-value memory layer for AI agents. It stores documentation embeddings for semantic RAG search, README historical versions, and code cleanup patches dynamically."
+    },
+    {
+      "id": "doc_4",
+      "filename": "agents.md",
+      "section": "Orchestrator Agent",
+      "content": "The Orchestrator Agent (Generalist) is the central dispatcher. Webhook pushes are fast-routed directly to the Documentation Helper, manual searches go to Knowledge Base, file scans go to Cleaner Agent. Unknown requests are evaluated via Gemini classification LLM."
+    },
+    {
+      "id": "doc_5",
+      "filename": "agents.md",
+      "section": "Documentation Helper",
+      "content": "The Documentation Helper automatically rewrites and standardizes structural README files upon push hooks. It extracts the raw diff, reads the existing file, triggers Gemini to synthesize updates, opens simulated Pull Requests on Github, and archives old contents in Parcle."
+    },
+    {
+      "id": "doc_6",
+      "filename": "agents.md",
+      "section": "Knowledge Base Agent",
+      "content": "The Knowledge Base Agent answers code and system-level queries. It translates questions into vector embeddings using standard models, executes similarity scoring across Parcle's database, and constructs fully cited, hallucination-free answers."
+    },
+    {
+      "id": "doc_7",
+      "filename": "agents.md",
+      "section": "Cleaner Agent",
+      "content": "The Cleaner Agent performs specialized static analysis scanner checks. It discovers unused imports, unreferenced variables, and dead handlers in typescript/javascript layouts. It suggests patches in unified diff format without altering codebases directly."
+    }
+  ],
+  "qa_logs": [],
+  "clean_patches": {},
+  "pipeline_runs": []
+}

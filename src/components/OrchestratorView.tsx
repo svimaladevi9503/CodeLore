@@ -1,6 +1,24 @@
 import React, { useState } from "react";
 import { Play, ChevronRight, ChevronDown, Layers, Terminal } from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
+import { m, AnimatePresence } from "motion/react";
+
+const getAgentColor = (route: string) => {
+  const routeLower = route.toLowerCase();
+  if (routeLower.includes("orchestrator")) return "text-purple-400 border-purple-500/20 bg-purple-500/5";
+  if (routeLower.includes("doc") || routeLower.includes("readme")) return "text-teal-400 border-teal-500/20 bg-teal-500/5";
+  if (routeLower.includes("knowledge") || routeLower.includes("rag")) return "text-blue-400 border-blue-500/20 bg-blue-500/5";
+  if (routeLower.includes("cleaner") || routeLower.includes("ast")) return "text-amber-400 border-amber-500/20 bg-amber-500/5";
+  return "text-slate-400 border-slate-800 bg-slate-900/50";
+};
+
+const getAgentBadgeText = (route: string) => {
+  const routeLower = route.toLowerCase();
+  if (routeLower.includes("orchestrator")) return "orchestrator agent";
+  if (routeLower.includes("doc") || routeLower.includes("readme")) return "documentation helper";
+  if (routeLower.includes("knowledge") || routeLower.includes("rag")) return "knowledge base";
+  if (routeLower.includes("cleaner") || routeLower.includes("ast")) return "cleaner agent";
+  return "unknown specialist";
+};
 
 interface OrchestratorViewProps {
   orchPayload: string;
@@ -32,23 +50,7 @@ export default function OrchestratorView({
 }: OrchestratorViewProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const getAgentColor = (route: string) => {
-    const routeLower = route.toLowerCase();
-    if (routeLower.includes("orchestrator")) return "text-purple-400 border-purple-500/20 bg-purple-500/5";
-    if (routeLower.includes("doc") || routeLower.includes("readme")) return "text-teal-400 border-teal-500/20 bg-teal-500/5";
-    if (routeLower.includes("knowledge") || routeLower.includes("rag")) return "text-blue-400 border-blue-500/20 bg-blue-500/5";
-    if (routeLower.includes("cleaner") || routeLower.includes("ast")) return "text-amber-400 border-amber-500/20 bg-amber-500/5";
-    return "text-slate-400 border-slate-800 bg-slate-900/50";
-  };
 
-  const getAgentBadgeText = (route: string) => {
-    const routeLower = route.toLowerCase();
-    if (routeLower.includes("orchestrator")) return "orchestrator agent";
-    if (routeLower.includes("doc") || routeLower.includes("readme")) return "documentation helper";
-    if (routeLower.includes("knowledge") || routeLower.includes("rag")) return "knowledge base";
-    if (routeLower.includes("cleaner") || routeLower.includes("ast")) return "cleaner agent";
-    return "unknown specialist";
-  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -80,8 +82,9 @@ export default function OrchestratorView({
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="flex flex-col gap-1.5">
-            <label className="text-[12px] font-sans font-normal text-slate-400">Asserted event type</label>
+            <label htmlFor="event-type-select" className="text-[12px] font-sans font-normal text-slate-400">Asserted event type</label>
             <select
+              id="event-type-select"
               value={orchEventType}
               onChange={(e) => setOrchEventType(e.target.value)}
               className="bg-slate-900 border border-slate-800 rounded-lg text-[12px] font-sans font-normal p-2.5 text-slate-200 outline-none focus:border-purple-500 transition cursor-pointer"
@@ -94,12 +97,14 @@ export default function OrchestratorView({
           </div>
 
           <div className="md:col-span-2 flex flex-col gap-1.5">
-            <label className="text-[12px] font-sans font-normal text-slate-400">Event payload contents</label>
+            <label htmlFor="payload-input" className="text-[12px] font-sans font-normal text-slate-400">Event payload contents</label>
             <input
+              id="payload-input"
               type="text"
               placeholder="e.g., 'Please check main repository file and scan for unused statements' or generic queries."
               value={orchPayload}
               onChange={(e) => setOrchPayload(e.target.value)}
+              aria-label="Event payload contents"
               className="bg-slate-900 border border-slate-800 rounded-lg text-[12px] font-sans font-normal p-2.5 text-slate-200 outline-none focus:border-purple-500 transition placeholder-slate-600"
             />
           </div>
@@ -107,8 +112,9 @@ export default function OrchestratorView({
 
         <div className="flex justify-end pt-1">
           <button
+            type="button"
             onClick={dispatchOrchEvent}
-            className="bg-purple-500 hover:bg-purple-400 text-slate-950 px-4 py-2 rounded-lg font-sans text-[12px] font-medium cursor-pointer flex items-center gap-1.5 active:scale-95 transition"
+            className="bg-purple-500 hover:bg-purple-400 text-black px-4 py-2 rounded-lg font-sans text-[12px] font-medium cursor-pointer flex items-center gap-1.5 active:scale-95 transition"
           >
             <Play className="h-3.5 w-3.5 fill-current" />
             <span>Dispatch to orchestrator</span>
@@ -137,7 +143,7 @@ export default function OrchestratorView({
                 const cardColor = getAgentColor(ev.route);
                 
                 return (
-                  <motion.div
+                  <m.div
                     key={ev.id}
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -225,7 +231,7 @@ export default function OrchestratorView({
                         </pre>
                       </div>
                     )}
-                  </motion.div>
+                  </m.div>
                 );
               })}
             </AnimatePresence>

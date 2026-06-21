@@ -79,6 +79,7 @@ export default function VaultPanel({
               <div className="flex flex-col gap-1.5">
                 {Object.entries(parcleData.readmes).map(([key, val]: any, idx) => (
                   <button
+                    type="button"
                     key={key}
                     onClick={() => setHistoricDiffOverlay({
                       open: true,
@@ -132,9 +133,10 @@ export default function VaultPanel({
                 <div className="text-[11px] text-slate-650 font-mono py-2 text-center">No catalog indexed.</div>
               ) : (
                 <div className="space-y-1.5 border-t border-slate-900 pt-2.5 mt-1">
-                  {parcleData.v_store.slice(-5).map((ch, idx) => (
+                  {parcleData.v_store.slice(-5).map((ch) => (
                     <button
-                      key={idx}
+                      type="button"
+                      key={`vault-chunk-${ch.filename}-${ch.section}`}
                       onClick={() => {
                         setActiveTab("kb");
                       }}
@@ -160,9 +162,15 @@ export default function VaultPanel({
 
             {/* Static Cleaner Scan History */}
             <div className="flex flex-col gap-1.5">
-              <div 
+              <button 
+                type="button"
                 onClick={() => setActiveTab("cleaner")}
-                className="p-2.5 bg-slate-950/20 border border-slate-900 hover:border-purple-500/40 rounded transition flex items-center justify-between gap-3 font-mono text-[11px] leading-snug cursor-pointer select-none"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    setActiveTab("cleaner");
+                  }
+                }}
+                className="w-full text-left p-2.5 bg-slate-950/20 border border-slate-900 hover:border-purple-500/40 rounded transition flex items-center justify-between gap-3 font-mono text-[11px] leading-snug cursor-pointer select-none"
               >
                 <div>
                   <div className="text-slate-300 font-medium">AST scanning report</div>
@@ -170,9 +178,9 @@ export default function VaultPanel({
                 </div>
                 <div className="text-right">
                   <span className="text-amber-500 block font-medium">suggested</span>
-                  <span className="text-[10px] text-slate-600 block mt-0.5">2026-06-21</span>
+                  <span className="text-[10px] text-slate-650 block mt-0.5">2026-06-21</span>
                 </div>
-              </div>
+              </button>
             </div>
           </div>
 

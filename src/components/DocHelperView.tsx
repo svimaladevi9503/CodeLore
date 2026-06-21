@@ -22,6 +22,38 @@ interface DocHelperViewProps {
   setPendingWebhook: (val: WebhookResult | null) => void;
 }
 
+function GithubDiffLines({ diffText }: { diffText: string }) {
+  const diffLines = React.useMemo(() => {
+    return diffText.split("\n").map((line, idx) => ({
+      id: `diff-line-${idx}`,
+      line
+    }));
+  }, [diffText]);
+
+  return (
+    <>
+      {diffLines.map((item) => {
+        let lineStyle = "text-slate-400";
+        if (item.line.startsWith("+") && !item.line.startsWith("+++")) {
+          lineStyle = "bg-teal-500/10 text-teal-300 font-mono py-0.5 border-l-2 border-teal-500 pl-1";
+        } else if (item.line.startsWith("-") && !item.line.startsWith("---")) {
+          lineStyle = "bg-rose-500/10 text-rose-300 font-mono py-0.5 border-l-2 border-rose-500 pl-1";
+        } else if (item.line.startsWith("@@")) {
+          lineStyle = "text-indigo-400/80 font-mono text-[11px] bg-indigo-500/5 py-0.5";
+        } else if (item.line.startsWith("diff") || item.line.startsWith("index") || item.line.startsWith("---") || item.line.startsWith("+++")) {
+          lineStyle = "text-slate-500 font-mono font-medium";
+        }
+
+        return (
+          <div key={item.id} className={`whitespace-pre-wrap select-text text-[11px] ${lineStyle}`}>
+            {item.line}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 export default function DocHelperView({
   commitAuthor,
   setCommitAuthor,
@@ -42,30 +74,7 @@ export default function DocHelperView({
   setPendingWebhook
 }: DocHelperViewProps) {
 
-  // Parse lines for patterned syntax highlighting in git diff
-  const renderGithubDiffLines = (diffText: string) => {
-    return diffText.split("\n").map((line, idx) => {
-      let lineStyle = "text-slate-400";
-      let prefix = "";
-      if (line.startsWith("+") && !line.startsWith("+++")) {
-        lineStyle = "bg-teal-500/10 text-teal-300 font-mono py-0.5 border-l-2 border-teal-500 pl-1";
-        prefix = "+ ";
-      } else if (line.startsWith("-") && !line.startsWith("---")) {
-        lineStyle = "bg-rose-500/10 text-rose-300 font-mono py-0.5 border-l-2 border-rose-500 pl-1";
-        prefix = "- ";
-      } else if (line.startsWith("@@")) {
-        lineStyle = "text-indigo-400/80 font-mono text-[11px] bg-indigo-500/5 py-0.5";
-      } else if (line.startsWith("diff") || line.startsWith("index") || line.startsWith("---") || line.startsWith("+++")) {
-        lineStyle = "text-slate-500 font-mono font-medium";
-      }
 
-      return (
-        <div key={idx} className={`whitespace-pre-wrap select-text text-[11px] ${lineStyle}`}>
-          {line}
-        </div>
-      );
-    });
-  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -98,41 +107,49 @@ export default function DocHelperView({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1">
-              <label className="text-[12px] font-sans font-normal text-slate-400">Author identity</label>
+              <label htmlFor="author-input" className="text-[12px] font-sans font-normal text-slate-400">Author identity</label>
               <input
+                id="author-input"
                 type="text"
                 value={commitAuthor}
                 onChange={(e) => setCommitAuthor(e.target.value)}
+                aria-label="Author identity"
                 className="bg-slate-900 border border-slate-800 rounded-lg text-[12px] font-sans p-2 text-slate-200 outline-none focus:border-teal-500 transition"
               />
             </div>
 
             <div className="flex flex-col gap-1">
-              <label className="text-[12px] font-sans font-normal text-slate-400">Repository node</label>
+              <label htmlFor="repo-input" className="text-[12px] font-sans font-normal text-slate-400">Repository node</label>
               <input
+                id="repo-input"
                 type="text"
                 value={repoName}
                 onChange={(e) => setRepoName(e.target.value)}
+                aria-label="Repository node"
                 className="bg-slate-900 border border-slate-800 rounded-lg text-[12px] font-sans p-2 text-slate-200 outline-none focus:border-teal-500 transition"
               />
             </div>
 
             <div className="flex flex-col gap-1">
-              <label className="text-[12px] font-sans font-normal text-slate-400">Commit status message</label>
+              <label htmlFor="commit-msg-input" className="text-[12px] font-sans font-normal text-slate-400">Commit status message</label>
               <input
+                id="commit-msg-input"
                 type="text"
                 value={commitMessage}
                 onChange={(e) => setCommitMessage(e.target.value)}
+                aria-label="Commit status message"
                 className="bg-slate-900 border border-slate-800 rounded-lg text-[12px] font-sans p-2 text-slate-200 outline-none focus:border-teal-500 transition"
               />
             </div>
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-[12px] font-sans font-normal text-slate-400">Simulate code modification diff</label>
+            <label htmlFor="diff-input" className="text-[12px] font-sans font-normal text-slate-400">Simulate code modification diff</label>
             <textarea
+              id="diff-input"
               value={testDiff}
               onChange={(e) => setTestDiff(e.target.value)}
+              aria-label="Simulate code modification diff"
               rows={6}
               className="bg-slate-900 border border-slate-800 rounded-lg font-mono text-[11px] p-2 text-slate-200 outline-none focus:border-teal-500 transition resize-none h-full min-h-[140px]"
             />
@@ -141,9 +158,10 @@ export default function DocHelperView({
 
         <div className="flex justify-end pt-1">
           <button
+            type="button"
             onClick={triggerPushWebhook}
             disabled={isPushing}
-            className="bg-teal-500 hover:bg-teal-400 text-slate-950 font-sans font-medium text-[12px] py-2 px-4 rounded-lg cursor-pointer flex items-center gap-1.5 disabled:opacity-50 active:scale-95 transition"
+            className="bg-teal-500 hover:bg-teal-400 text-black font-sans font-medium text-[12px] py-2 px-4 rounded-lg cursor-pointer flex items-center gap-1.5 disabled:opacity-50 active:scale-95 transition"
           >
             <GitPullRequest className="h-3.5 w-3.5" />
             <span>{isPushing ? "Analyzing diff..." : "Trigger git push webhook"}</span>
@@ -159,7 +177,7 @@ export default function DocHelperView({
             Incoming change diff block
           </h4>
           <div className="font-mono bg-slate-950 p-3 rounded-lg overflow-auto max-h-[300px] h-full min-h-[200px] leading-relaxed text-slate-350 select-text select-all">
-            {renderGithubDiffLines(testDiff)}
+            <GithubDiffLines diffText={testDiff} />
           </div>
         </div>
 
@@ -265,14 +283,16 @@ export default function DocHelperView({
 
           <div className="flex gap-2">
             <button
+              type="button"
               onClick={() => setPendingWebhook(null)}
               className="text-[11px] font-mono text-slate-400 hover:text-white px-3 py-1 bg-slate-900 border border-slate-800 rounded hover:border-slate-700 cursor-pointer"
             >
               Reject
             </button>
             <button
+              type="button"
               onClick={approveReadmeRevision}
-              className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-sans font-medium text-[11px] px-3.5 py-1.5 rounded flex items-center gap-1 cursor-pointer transition active:scale-95"
+              className="bg-emerald-500 hover:bg-emerald-400 text-black font-sans font-medium text-[11px] px-3.5 py-1.5 rounded flex items-center gap-1 cursor-pointer transition active:scale-95"
             >
               <Check className="h-3.5 w-3.5" />
               <span>Accept & update codebase docs</span>

@@ -11,6 +11,16 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const IMPORT_REGEX_CACHE = new Map<string, RegExp>();
+const getImportRegex = (name: string): RegExp => {
+  let regex = IMPORT_REGEX_CACHE.get(name);
+  if (!regex) {
+    regex = new RegExp(`\\b${name}\\b`, 'g');
+    IMPORT_REGEX_CACHE.set(name, regex);
+  }
+  return regex;
+};
+
 const app = express();
 const PORT = 3000;
 
@@ -309,9 +319,8 @@ app.post("/api/clean/scan", (req, res) => {
       }
     });
 
-    // Verify imported symbols usage
     for (const imp of importedSymbols) {
-      const regex = new RegExp(`\\b${imp.name}\\b`, 'g');
+      const regex = getImportRegex(imp.name);
       let count = 0;
       fLines.forEach((searchLine, sIdx) => {
         if (sIdx !== imp.line) {

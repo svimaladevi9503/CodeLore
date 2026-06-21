@@ -19,6 +19,88 @@ interface CleanerAgentViewProps {
   renderedIssues: ScanIssue[];
 }
 
+const mockFiles = [
+  { name: "Sandbox.tsx", size: "1.2 KB", active: true },
+  { name: "server.ts", size: "4.8 KB", active: false },
+  { name: "App.tsx", size: "12.4 KB", active: false },
+  { name: "pipeline.ts", size: "3.2 KB", active: false }
+];
+
+interface InteractiveEditorLinesProps {
+  cleanerCode: string;
+  renderedIssues: ScanIssue[];
+  selectedFile: string;
+  handleLineClick: (e: any, issue: ScanIssue) => void;
+}
+
+function InteractiveEditorLines({
+  cleanerCode,
+  renderedIssues,
+  selectedFile,
+  handleLineClick
+}: InteractiveEditorLinesProps) {
+  const codeLines = React.useMemo(() => {
+    return cleanerCode.split("\n").map((line, idx) => ({
+      id: `cleaner-line-${idx}`,
+      line,
+      lineNum: idx + 1
+    }));
+  }, [cleanerCode]);
+
+  return (
+    <>
+      {codeLines.map((item) => {
+        const matchingIssue = renderedIssues.find(i => {
+          if (selectedFile === "Sandbox.tsx") {
+            if (item.lineNum === 2 && i.issue_type.toLowerCase().includes("import")) return true;
+            if (item.lineNum === 5 && i.issue_type.toLowerCase().includes("variable")) return true;
+          }
+          return false;
+        });
+
+        return (
+          <div 
+            key={item.id} 
+            className={`flex group font-mono text-[11px] py-0.5 leading-normal relative ${
+              matchingIssue ? "bg-amber-500/5" : "hover:bg-slate-900/30"
+            }`}
+          >
+            <span className="w-8 select-none text-right pr-3 text-slate-650 font-mono">
+              {item.lineNum}
+            </span>
+            
+            <span className="flex-1 whitespace-pre-wrap select-text text-slate-350 relative">
+              {matchingIssue ? (
+                <button 
+                  type="button"
+                  onClick={(e) => handleLineClick(e, matchingIssue)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      handleLineClick(e, matchingIssue);
+                    }
+                  }}
+                  className="border-b border-dashed border-amber-400 bg-amber-500/10 cursor-help rounded-xs px-0.5 text-left font-mono whitespace-pre-wrap flex-1"
+                  title="Click to expand analysis tip"
+                >
+                  {item.line}
+                </button>
+              ) : (
+                <span>{item.line}</span>
+              )}
+            </span>
+
+            {matchingIssue && (
+              <span className="absolute right-2 top-0.5 text-[9px] font-mono text-amber-500 bg-amber-500/5 px-1 rounded-sm select-none">
+                AST FLAG
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 export default function CleanerAgentView({
   cleanerCode,
   setCleanerCode,
@@ -40,12 +122,7 @@ export default function CleanerAgentView({
   const [hoveredIssue, setHoveredIssue] = useState<ScanIssue | null>(null);
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  const mockFiles = [
-    { name: "Sandbox.tsx", size: "1.2 KB", active: true },
-    { name: "server.ts", size: "4.8 KB", active: false },
-    { name: "App.tsx", size: "12.4 KB", active: false },
-    { name: "pipeline.ts", size: "3.2 KB", active: false }
-  ];
+
 
   const handleCopyClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -62,55 +139,7 @@ export default function CleanerAgentView({
     setHoveredIssue(issue);
   };
 
-  // Split sandbox code to demonstrate inline tooltips and highlights
-  const renderInteractiveEditorLines = () => {
-    return cleanerCode.split("\n").map((line, idx) => {
-      const lineNum = idx + 1;
-      
-      // Look for a completed/streamed issue for this exact line number
-      const matchingIssue = renderedIssues.find(i => {
-        // Simple heuristic or strict match if available
-        if (selectedFile === "Sandbox.tsx") {
-          if (lineNum === 2 && i.issue_type.toLowerCase().includes("import")) return true;
-          if (lineNum === 5 && i.issue_type.toLowerCase().includes("variable")) return true;
-        }
-        return false;
-      });
 
-      return (
-        <div 
-          key={idx} 
-          className={`flex group font-mono text-[11px] py-0.5 leading-normal relative ${
-            matchingIssue ? "bg-amber-500/5" : "hover:bg-slate-900/30"
-          }`}
-        >
-          <span className="w-8 select-none text-right pr-3 text-slate-650 font-mono">
-            {lineNum}
-          </span>
-          
-          <span className="flex-1 whitespace-pre-wrap select-text text-slate-350 relative">
-            {matchingIssue ? (
-              <span 
-                onClick={(e) => handleLineClick(e, matchingIssue)}
-                className="border-b border-dashed border-amber-400 bg-amber-500/10 cursor-help rounded-xs px-0.5"
-                title="Click to expand analysis tip"
-              >
-                {line}
-              </span>
-            ) : (
-              <span>{line}</span>
-            )}
-          </span>
-
-          {matchingIssue && (
-            <span className="absolute right-2 top-0.5 text-[9px] font-mono text-amber-500 bg-amber-500/5 px-1 rounded-sm select-none">
-              AST FLAG
-            </span>
-          )}
-        </div>
-      );
-    });
-  };
 
   return (
     <div className="flex flex-col gap-6 relative">
@@ -159,6 +188,7 @@ export default function CleanerAgentView({
           <div className="flex flex-col gap-1">
             {mockFiles.map((file) => (
               <button
+                type="button"
                 key={file.name}
                 onClick={() => setSelectedFile(file.name)}
                 className={`w-full flex items-center justify-between p-2 py-1.5 rounded text-left text-[12px] font-mono transition-all ${
@@ -191,6 +221,7 @@ export default function CleanerAgentView({
           <div className="bg-slate-900/40 border-b border-slate-850 px-4 py-2 flex items-center justify-between text-[12px] shrink-0">
             <span className="font-mono text-slate-400">{selectedFile}</span>
             <button
+              type="button"
               onClick={() => setCleanerCode(
                 `import React, { useState, useEffect } from 'react';
 import { Layers } from 'lucide-react'; // Unused import
@@ -216,7 +247,7 @@ export default function HomeView() {
           <div className="flex-1 p-3 font-mono bg-slate-950 leading-relaxed overflow-auto relative select-none">
             {selectedFile === "Sandbox.tsx" ? (
               <div className="min-h-[220px]">
-                {renderInteractiveEditorLines()}
+                <InteractiveEditorLines cleanerCode={cleanerCode} renderedIssues={renderedIssues} selectedFile={selectedFile} handleLineClick={handleLineClick} />
               </div>
             ) : (
               <div className="text-[12px] font-sans font-normal text-slate-500 py-10 text-center select-text">
@@ -256,9 +287,10 @@ export default function HomeView() {
             </div>
 
             <button
+              type="button"
               onClick={triggerCleanerScan}
               disabled={cleanerLoading}
-              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-sans font-medium text-[12px] py-1.5 px-4 rounded cursor-pointer transition active:scale-95 disabled:opacity-50"
+              className="bg-amber-500 hover:bg-amber-400 text-black font-sans font-medium text-[12px] py-1.5 px-4 rounded cursor-pointer transition active:scale-95 disabled:opacity-50"
             >
               {cleanerLoading ? "parsing trees..." : "execute AST clean scan"}
             </button>
@@ -275,6 +307,7 @@ export default function HomeView() {
           <div className="flex justify-between items-start font-mono text-[10px] text-amber-400 uppercase tracking-widest pb-1 border-b border-slate-900 leading-none mb-1">
             <span>{hoveredIssue.issue_type}</span>
             <button 
+              type="button"
               onClick={() => setHoveredIssue(null)}
               className="text-slate-500 hover:text-white pb-0.5"
             >
@@ -284,6 +317,7 @@ export default function HomeView() {
           <p className="font-sans font-normal">{hoveredIssue.suggestion}</p>
           <div className="flex justify-end gap-1.5 mt-1">
             <button
+              type="button"
               onClick={() => handleCopyClipboard(hoveredIssue.patch_snippet, hoveredIssue.line.toString())}
               className="text-[10px] font-mono text-slate-400 hover:text-white px-2 py-0.5 border border-slate-850 rounded hover:border-slate-700 cursor-pointer flex items-center gap-1"
             >
@@ -308,8 +342,9 @@ export default function HomeView() {
 
           <div className="flex justify-end mt-1">
             <button
+              type="button"
               onClick={applyCleanerPatch}
-              className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-sans font-medium text-[12px] px-4 py-2 rounded-lg transition active:scale-95 cursor-pointer flex items-center gap-1.5"
+              className="bg-emerald-500 hover:bg-emerald-400 text-black font-sans font-medium text-[12px] px-4 py-2 rounded-lg transition active:scale-95 cursor-pointer flex items-center gap-1.5"
             >
               <CheckCircle className="h-3.5 w-3.5" />
               <span>Apply suggested patch</span>
