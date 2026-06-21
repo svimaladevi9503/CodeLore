@@ -1,0 +1,6 @@
+{
+  "name": "CodeLore",
+  "description": "Workspace lens to help your code and documentations self sustaining",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
