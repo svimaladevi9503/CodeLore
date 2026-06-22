@@ -588,7 +588,7 @@ function useAppLogic() {
 
   const [docHelperState, dispatchDocHelper] = useReducer(docHelperReducer, {
     commitAuthor: "github-expert",
-    repoName: "Parcle-sync",
+    repoName: "",
     commitMessage: "fix: integrate standard real-time event pipeline for sensor feeds",
     testDiff: `diff --git a/src/pipeline.ts b/src/pipeline.ts
 index c92b8d1..db3d6a2 105655

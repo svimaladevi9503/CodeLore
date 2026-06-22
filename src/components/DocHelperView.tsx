@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { 
   GitBranch, 
   ChevronRight, 
+  ChevronDown,
   Sparkles, 
   Check, 
   Trash2, 
@@ -16,6 +17,97 @@ import {
   FileText
 } from "lucide-react";
 import { m, AnimatePresence } from "motion/react";
+
+interface DropdownOption {
+  value: string;
+  label: string;
+}
+
+interface CustomDropdownProps {
+  label: string;
+  options: DropdownOption[];
+  value: string;
+  onChange: (val: string) => void;
+  theme: "light" | "dark";
+}
+
+function CustomDropdown({ label, options, value, onChange, theme }: CustomDropdownProps) {
+  const [open, setOpen] = useState(false);
+  const selectedOption = options.find(o => o.value === value) || options[0];
+
+  return (
+    <div className="flex flex-col gap-1.5 relative w-full font-sans">
+      <span className={`text-[10.5px] font-mono uppercase tracking-wider ${
+        theme === "dark" ? "text-slate-400" : "text-slate-500"
+      }`}>{label}</span>
+      
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border text-[12.5px] font-sans font-medium cursor-pointer transition-all outline-none w-full ${
+          open
+            ? "border-teal-500 bg-teal-500/5 text-teal-400"
+            : theme === "dark"
+              ? "border-slate-800 bg-slate-950 hover:border-slate-700 text-slate-200"
+              : "border-slate-200 bg-white hover:border-slate-350 text-slate-800"
+        }`}
+      >
+        <span className="truncate">{selectedOption.label}</span>
+        <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${
+          open ? "rotate-180 text-teal-400" : theme === "dark" ? "text-slate-500" : "text-slate-450"
+        }`} />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+            <m.div
+              initial={{ opacity: 0, y: -6, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -6, scale: 0.98 }}
+              transition={{ duration: 0.12, ease: "easeOut" }}
+              className={`absolute top-full mt-1.5 left-0 right-0 z-50 rounded-lg border overflow-hidden shadow-xl ${
+                theme === "dark"
+                  ? "bg-slate-900 border-slate-800"
+                  : "bg-white border-slate-200"
+              }`}
+              style={{ maxHeight: 200, overflowY: "auto" }}
+            >
+              {options.map((opt) => {
+                const isSelected = opt.value === value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => {
+                      onChange(opt.value);
+                      setOpen(false);
+                    }}
+                    className={`w-full text-left flex items-center justify-between gap-2 px-3 py-2.5 text-[12px] font-sans transition-colors cursor-pointer ${
+                      isSelected
+                        ? theme === "dark"
+                          ? "bg-teal-500/10 text-teal-350"
+                          : "bg-teal-50 text-teal-700"
+                        : theme === "dark"
+                          ? "text-slate-300 hover:bg-slate-800"
+                          : "text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span className="truncate">{opt.label}</span>
+                    {isSelected && (
+                      <Check className="h-3.5 w-3.5 shrink-0 text-teal-400" />
+                    )}
+                  </button>
+                );
+              })}
+            </m.div>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
 
 interface DocHelperViewProps {
   theme: "light" | "dark";
@@ -41,6 +133,50 @@ export default function DocHelperView({
   const [readmeSha, setReadmeSha] = useState("");
   const [loadingReadme, setLoadingReadme] = useState(false);
   const [readmeError, setReadmeError] = useState("");
+
+  const headerStyleOptions = [
+    { value: "classic", label: "Classic (Default)" },
+    { value: "clean", label: "Clean Minimalist" },
+    { value: "modern", label: "Modern Visual" },
+    { value: "compact", label: "Compact Overview" },
+    { value: "console", label: "Terminal Console" },
+    { value: "ascii", label: "Ascii Banner Header" }
+  ];
+
+  const badgeStyleOptions = [
+    { value: "default", label: "Default Shield Badges" },
+    { value: "flat", label: "Flat Square Badges" },
+    { value: "flat-square", label: "Flat Square Minimal" },
+    { value: "for-the-badge", label: "Big Banner Badges" },
+    { value: "plastic", label: "3D Plastic Badges" },
+    { value: "skills", label: "Technical Skill Badges" },
+    { value: "social", label: "Social Interaction Style" }
+  ];
+
+  const emojisOptions = [
+    { value: "default", label: "Default Developer Pack" },
+    { value: "minimal", label: "Minimal / None" },
+    { value: "ascension", label: "Ascension Glowing" },
+    { value: "harmony", label: "Harmony Flow" },
+    { value: "monochrome", label: "Monochrome Minimal" },
+    { value: "unicode", label: "Standard Unicode Emojis" },
+    { value: "water", label: "Nature / Water Elements" },
+    { value: "vintage", label: "Classic Vintage Emojis" },
+    { value: "zen", label: "Zen Meditative Emojis" }
+  ];
+
+  const alignOptions = [
+    { value: "center", label: "Centered" },
+    { value: "left", label: "Left Aligned" },
+    { value: "right", label: "Right Aligned" }
+  ];
+
+  const navigationStyleOptions = [
+    { value: "bullet", label: "Standard Bullets" },
+    { value: "accordion", label: "Accordion Toggle markup" },
+    { value: "number", label: "Numeric index" },
+    { value: "roman", label: "Roman Numerals" }
+  ];
 
   // Readmeai configuration template settings
   const [align, setAlign] = useState("center");
@@ -323,9 +459,13 @@ export default function DocHelperView({
                 </div>
               ) : readmeExists === true ? (
                 <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between bg-emerald-500/5 border border-emerald-500/20 p-3 rounded-lg">
-                    <span className="text-[12px] font-medium text-emerald-400 flex items-center gap-1.5">
-                      <Check className="h-4 w-4" />
+                  <div className={`flex items-center justify-between border p-3 rounded-lg ${
+                    theme === "dark" ? "bg-slate-950/60 border-slate-850" : "bg-slate-50 border-slate-200"
+                  }`}>
+                    <span className={`text-[12px] font-medium flex items-center gap-1.5 ${
+                      theme === "dark" ? "text-emerald-400" : "text-emerald-650"
+                    }`}>
+                      <Check className="h-4 w-4 text-emerald-500" />
                       README.md exists on GitHub
                     </span>
                     <button
@@ -333,7 +473,7 @@ export default function DocHelperView({
                       onClick={handleDeleteReadme}
                       disabled={deleting}
                       className={`p-1.5 rounded transition flex items-center gap-1 text-[11px] font-mono cursor-pointer ${
-                        theme === "dark" ? "text-slate-500 hover:text-red-400 hover:bg-slate-900 border border-slate-850" : "text-slate-450 hover:text-red-650 hover:bg-slate-50 border border-slate-200"
+                        theme === "dark" ? "text-slate-500 hover:text-red-400 hover:bg-slate-900 border border-slate-800" : "text-slate-450 hover:text-red-650 hover:bg-slate-50 border border-slate-200"
                       }`}
                     >
                       {deleting ? (
@@ -349,8 +489,15 @@ export default function DocHelperView({
                   </p>
                 </div>
               ) : readmeExists === false ? (
-                <div className="bg-amber-500/5 border border-amber-500/20 p-3.5 rounded-lg flex flex-col gap-1">
-                  <span className="text-[12px] font-medium text-amber-400">README.md not discovered</span>
+                <div className={`border p-3.5 rounded-lg flex flex-col gap-1 bg-transparent ${
+                  theme === "dark" ? "border-red-500/40" : "border-red-600/40"
+                }`}>
+                  <span className={`text-[12px] font-semibold flex items-center gap-1.5 ${
+                    theme === "dark" ? "text-red-400" : "text-red-605"
+                  }`}>
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    README.md not discovered
+                  </span>
                   <p className={`text-[11.5px] leading-relaxed mt-0.5 ${theme === "dark" ? "text-slate-400" : "text-slate-600"}`}>
                     This repository lacks a root README.md. Use the configurations below to generate a new file.
                   </p>
@@ -372,113 +519,49 @@ export default function DocHelperView({
               <div className="flex flex-col gap-4 font-sans">
                 
                 {/* Header Style Selector */}
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="header-style-select" className={`text-[11px] font-mono uppercase ${
-                    theme === "dark" ? "text-slate-400" : "text-slate-500"
-                  }`}>Header template style</label>
-                  <select
-                    id="header-style-select"
-                    value={headerStyle}
-                    onChange={(e) => setHeaderStyle(e.target.value)}
-                    className={`text-[12px] font-sans p-2 rounded-lg border outline-none cursor-pointer focus:border-teal-500 transition ${
-                      theme === "dark" ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
-                    }`}
-                  >
-                    <option value="classic">Classic (Default)</option>
-                    <option value="clean">Clean Minimalist</option>
-                    <option value="modern">Modern Visual</option>
-                    <option value="compact">Compact Overview</option>
-                    <option value="console">Terminal Console</option>
-                    <option value="ascii">Ascii Banner Header</option>
-                  </select>
-                </div>
+                <CustomDropdown
+                  label="Header template style"
+                  options={headerStyleOptions}
+                  value={headerStyle}
+                  onChange={setHeaderStyle}
+                  theme={theme}
+                />
 
                 {/* Badge Style Selector */}
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="badge-style-select" className={`text-[11px] font-mono uppercase ${
-                    theme === "dark" ? "text-slate-400" : "text-slate-500"
-                  }`}>Badge icon style type</label>
-                  <select
-                    id="badge-style-select"
-                    value={badgeStyle}
-                    onChange={(e) => setBadgeStyle(e.target.value)}
-                    className={`text-[12px] font-sans p-2 rounded-lg border outline-none cursor-pointer focus:border-teal-500 transition ${
-                      theme === "dark" ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
-                    }`}
-                  >
-                    <option value="default">Default Shield Badges</option>
-                    <option value="flat">Flat Square Badges</option>
-                    <option value="flat-square">Flat Square Minimal</option>
-                    <option value="for-the-badge">Big Banner Badges</option>
-                    <option value="plastic">3D Plastic Badges</option>
-                    <option value="skills">Technical Skill Badges</option>
-                    <option value="social">Social Interaction Style</option>
-                  </select>
-                </div>
+                <CustomDropdown
+                  label="Badge icon style type"
+                  options={badgeStyleOptions}
+                  value={badgeStyle}
+                  onChange={setBadgeStyle}
+                  theme={theme}
+                />
 
                 {/* Emojis Theme Selector */}
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="emojis-select" className={`text-[11px] font-mono uppercase ${
-                    theme === "dark" ? "text-slate-400" : "text-slate-500"
-                  }`}>Emoji theme pack</label>
-                  <select
-                    id="emojis-select"
-                    value={emojis}
-                    onChange={(e) => setEmojis(e.target.value)}
-                    className={`text-[12px] font-sans p-2 rounded-lg border outline-none cursor-pointer focus:border-teal-500 transition ${
-                      theme === "dark" ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
-                    }`}
-                  >
-                    <option value="default">Default Developer Pack</option>
-                    <option value="minimal">Minimal / None</option>
-                    <option value="ascension">Ascension Glowing</option>
-                    <option value="harmony">Harmony Flow</option>
-                    <option value="monochrome">Monochrome Minimal</option>
-                    <option value="unicode">Standard Unicode Emojis</option>
-                    <option value="water">Nature / Water Elements</option>
-                    <option value="vintage">Classic Vintage Emojis</option>
-                    <option value="zen">Zen Meditative Emojis</option>
-                  </select>
-                </div>
+                <CustomDropdown
+                  label="Emoji theme pack"
+                  options={emojisOptions}
+                  value={emojis}
+                  onChange={setEmojis}
+                  theme={theme}
+                />
 
                 {/* Text Alignment */}
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="align-select" className={`text-[11px] font-mono uppercase ${
-                    theme === "dark" ? "text-slate-400" : "text-slate-500"
-                  }`}>Header Text alignment</label>
-                  <select
-                    id="align-select"
-                    value={align}
-                    onChange={(e) => setAlign(e.target.value)}
-                    className={`text-[12px] font-sans p-2 rounded-lg border outline-none cursor-pointer focus:border-teal-500 transition ${
-                      theme === "dark" ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
-                    }`}
-                  >
-                    <option value="center">Centered</option>
-                    <option value="left">Left Aligned</option>
-                    <option value="right">Right Aligned</option>
-                  </select>
-                </div>
+                <CustomDropdown
+                  label="Header Text alignment"
+                  options={alignOptions}
+                  value={align}
+                  onChange={setAlign}
+                  theme={theme}
+                />
 
                 {/* Table of contents Navigation Style */}
-                <div className="flex flex-col gap-1.5 font-sans">
-                  <label htmlFor="nav-style-select" className={`text-[11px] font-mono uppercase ${
-                    theme === "dark" ? "text-slate-400" : "text-slate-500"
-                  }`}>Navigation index style</label>
-                  <select
-                    id="nav-style-select"
-                    value={navigationStyle}
-                    onChange={(e) => setNavigationStyle(e.target.value)}
-                    className={`text-[12px] font-sans p-2 rounded-lg border outline-none cursor-pointer focus:border-teal-500 transition ${
-                      theme === "dark" ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
-                    }`}
-                  >
-                    <option value="bullet">Standard Bullets</option>
-                    <option value="accordion">Accordion Toggle markup</option>
-                    <option value="number">Numeric index</option>
-                    <option value="roman">Roman Numerals</option>
-                  </select>
-                </div>
+                <CustomDropdown
+                  label="Navigation index style"
+                  options={navigationStyleOptions}
+                  value={navigationStyle}
+                  onChange={setNavigationStyle}
+                  theme={theme}
+                />
 
                 {/* Generate Button */}
                 <button
