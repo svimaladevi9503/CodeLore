@@ -1137,6 +1137,30 @@ export default function Sandbox() {
       pipelineRunning.current = false;
     }
   };
+  // Immediate Global Repo Setter
+  const setGlobalRepoName = async (val: string) => {
+    dispatchDocHelper({ type: "SET_REPO", value: val });
+    if (activeRepoName && val !== activeRepoName) {
+      setSwitchBanner({ show: true, repoName: val });
+    }
+    setActiveRepoName(val);
+    
+    // Reset session
+    const newSessionId = Math.random().toString(36).substring(2, 15);
+    dispatchKb({ type: "SET_SESSION_ID", value: newSessionId });
+    dispatchKb({ type: "SET_LOG", value: [] });
+    
+    try {
+      await fetch("/api/orchestrate/context", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active_repo: val })
+      });
+      await fetchDiagnostics();
+    } catch (err) {
+      console.error("Failed to sync active repo context:", err);
+    }
+  };
 
   return {
     orchState,
@@ -1160,6 +1184,7 @@ export default function Sandbox() {
     runPipelineCheck,
     fetchDiagnostics,
     activeRepoName,
+    setGlobalRepoName,
     switchBanner,
     setSwitchBanner
   };
@@ -1187,6 +1212,7 @@ export default function App() {
     applyCleanerPatch,
     fetchDiagnostics,
     activeRepoName,
+    setGlobalRepoName,
     switchBanner,
     setSwitchBanner
   } = useAppLogic();
@@ -1243,8 +1269,8 @@ export default function App() {
                     dispatchOrchEvent={dispatchOrchEvent}
                     orchResult={orchState.result}
                     routingEvents={uiState.routingEvents}
-                    repoName={docHelperState.repoName}
-                    setRepoName={(val) => dispatchDocHelper({ type: "SET_REPO", value: val })}
+                    repoName={activeRepoName || docHelperState.repoName}
+                    setRepoName={setGlobalRepoName}
                   />
                 </m.div>
               )}
@@ -1259,8 +1285,8 @@ export default function App() {
                 >
                   <DocHelperView
                     theme={uiState.theme}
-                    repoName={docHelperState.repoName}
-                    setRepoName={(val) => dispatchDocHelper({ type: "SET_REPO", value: val })}
+                    repoName={activeRepoName || docHelperState.repoName}
+                    setRepoName={setGlobalRepoName}
                     fetchDiagnostics={fetchDiagnostics}
                   />
                 </m.div>

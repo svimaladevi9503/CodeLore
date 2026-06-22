@@ -424,7 +424,7 @@ export default function KnowledgeBaseView({
             </svg>
           </div>
           <h4 className="text-[14px] font-sans font-medium text-white mt-4">
-            Please select a repository to start the Conversation!
+            {repoContext?.owner ? `@${repoContext.owner}` : "User"} Please Select a repository to start the conversation
           </h4>
         </div>
       ) : (
