@@ -41,7 +41,7 @@ let parcleDb: {
   clean_patches: Record<string, { file: string; patch: string; timestamp: string; applied: boolean; issues?: any[] }>;
   pipeline_runs: Array<{ id: string; name: string; status: string; timestamp: string; log: string }>;
   routing_events: Array<{ id: string; timestamp: string; eventType: string; payload: string; route: string; confidence: number; outcome: string; failed?: boolean }>;
-  metadata?: Record<string, any>;
+  metadata: Record<string, any>;
 } = {
   readmes: {},
   prs: {},
@@ -1577,7 +1577,124 @@ app.post("/api/github/delete-readme", async (req, res) => {
   }
 });
 
-// Run local readme-ai command on cloned remote repository code
+// Map to cache generated project logos: repo -> base64ImageBytes
+const generatedLogos = new Map<string, string>();
+
+// GET /api/readme/logo — Serve cached base64 project logo as binary image
+app.get("/api/readme/logo", (req, res) => {
+  const repo = req.query.repo as string;
+  if (!repo) {
+    return res.status(400).send("Missing repo query parameter");
+  }
+  const base64Str = generatedLogos.get(repo);
+  if (!base64Str) {
+    return res.status(404).send("Logo not found");
+  }
+  try {
+    const buffer = Buffer.from(base64Str, "base64");
+    res.setHeader("Content-Type", "image/png");
+    res.send(buffer);
+  } catch (err: any) {
+    res.status(500).send("Failed to decode image");
+  }
+});
+
+// Fallback project logo SVG generator
+function getFallbackSvgLogo(projectName: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+    <defs>
+      <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" style="stop-color:#3B82F6;stop-opacity:1" />
+        <stop offset="100%" style="stop-color:#8B5CF6;stop-opacity:1" />
+      </linearGradient>
+    </defs>
+    <rect width="100%" height="100%" rx="40" fill="#0F172A"/>
+    <circle cx="100" cy="90" r="50" fill="url(#grad)" opacity="0.85"/>
+    <text x="100" y="160" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="bold" fill="#F8FAFC" text-anchor="middle">${projectName}</text>
+  </svg>`;
+  return Buffer.from(svg).toString("base64");
+}
+
+// Generate project logo image using Gemini Imagen API
+async function generateLogoImage(projectName: string): Promise<string> {
+  const ai = getAI();
+  if (!ai) {
+    return getFallbackSvgLogo(projectName);
+  }
+  try {
+    const response = await ai.models.generateImages({
+      model: "imagen-3.0-generate-002",
+      prompt: `A beautiful and modern minimalist flat logo for a software project named "${projectName}". High-quality, clean vector graphic icon, dark mode friendly, creative, tech brand logo design, 1:1 aspect ratio, no text other than the name "${projectName}".`,
+      config: {
+        numberOfImages: 1,
+        outputMimeType: "image/png",
+        aspectRatio: "1:1",
+      },
+    });
+    if (response?.generatedImages?.[0]?.image?.imageBytes) {
+      return response.generatedImages[0].image.imageBytes;
+    }
+  } catch (err) {
+    console.error("Gemini image generation failed:", err);
+  }
+  return getFallbackSvgLogo(projectName);
+}
+
+// Format repository name to proper project name
+function getProperProjectName(repoName: string): string {
+  if (!repoName) return "Project";
+  return repoName
+    .split(/[-_\s]+/)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+// Recursively traverse cloned repo to gather files and contents
+function getRepositoryContext(dir: string): { fileTree: string; fileContents: string } {
+  const files: string[] = [];
+  const contentsMap: Record<string, string> = {};
+  
+  const walk = (currentDir: string) => {
+    const list = fs.readdirSync(currentDir);
+    for (const item of list) {
+      const fullPath = path.join(currentDir, item);
+      const relPath = path.relative(dir, fullPath);
+      
+      if (
+        relPath.startsWith(".git") || 
+        relPath.includes("node_modules") || 
+        relPath.includes(".venv") || 
+        relPath.includes("dist") || 
+        relPath.includes("build")
+      ) {
+        continue;
+      }
+      
+      const stat = fs.statSync(fullPath);
+      if (stat.isDirectory()) {
+        walk(fullPath);
+      } else {
+        files.push(relPath);
+        const ext = path.extname(item).toLowerCase();
+        const isTextFile = [".sh", ".json", ".py", ".js", ".ts", ".yml", ".yaml", ".txt", ".md", ".cfg", ".ini", ".toml"].includes(ext);
+        if (isTextFile && stat.size < 30000) {
+          try {
+            contentsMap[relPath] = fs.readFileSync(fullPath, "utf-8");
+          } catch (e) {}
+        }
+      }
+    }
+  };
+  
+  walk(dir);
+  const fileTree = files.join("\n");
+  const fileContents = Object.entries(contentsMap)
+    .map(([file, content]) => `--- File: ${file} ---\n${content}`)
+    .join("\n\n");
+  return { fileTree, fileContents };
+}
+
+// Run local readme-ai command on cloned remote repository code and post-process with Gemini
 app.post("/api/readme/generate", async (req, res) => {
   const { token, repo, repoName, align, badgeStyle, headerStyle, navigationStyle, emojis } = req.body;
   if (!token || !repo) {
@@ -1615,7 +1732,70 @@ app.post("/api/readme/generate", async (req, res) => {
     }
 
     const content = fs.readFileSync(genPath, "utf-8");
-    res.json({ status: "success", content });
+    
+    // Step 1: Generate project logo image and cache it
+    const properProjectName = getProperProjectName(repoName || repo.split("/")[1]);
+    let logoBase64 = "";
+    try {
+      logoBase64 = await generateLogoImage(properProjectName);
+      if (logoBase64) {
+        generatedLogos.set(repo, logoBase64);
+      }
+    } catch (logoErr) {
+      console.error("Logo generation failed:", logoErr);
+    }
+
+    // Step 2: Post-process generated README using Gemini and repository files context
+    const ai = getAI();
+    let finalMarkdown = content;
+    if (ai) {
+      const repoCtx = getRepositoryContext(tempDir);
+      const rewriteResponse = await ai.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: `You are an expert README generator. Re-write the following draft README file to make it perfect, professional, and fully completed.
+Follow these rules strictly:
+1. Project Name: Format the repository name "${repoName || repo.split("/")[1]}" properly without special symbols or underscores (e.g. easy_deploy becomes "Easy Deploy", repo_1782114619665_nj2br becomes "Repo 1782114619665 Nj2br").
+2. Logo: Include the project logo at the top using this exact HTML tag (do not change or modify the URL):
+   <img src="/api/readme/logo?repo=${encodeURIComponent(repo)}" align="center" width="150" alt="Project Logo"/>
+3. Overview: Analyze the repository files and write a comprehensive, high-quality, professional project overview. No empty sections or "no data" bugs allowed.
+4. Features: Document the actual features of the project based on the repository content. No placeholders like "❯ REPLACE-ME" or "REPLACE-ME" allowed.
+5. Project Structure: Display the tree/structure of the repository. Use the actual GitHub repository path "${repo}" as the root folder.
+6. Project Index: Ensure it refers to the proper name or GitHub path, not REPO_1782114619665_NJ2BR or placeholder root strings.
+7. Installation: Write the actual, concrete installation instructions based on the repo configuration (e.g. if you see package.json, use npm install; if you see python files, use pip install; if you see deploy.sh, describe how to make it executable and run it). No placeholders (like 'INSERT-INSTALL-COMMAND-HERE' or 'echo ...') allowed.
+8. Usage & Running: Write the actual run commands (e.g. if it's a shell script, run "./deploy.sh"). No placeholders (like 'INSERT-RUN-COMMAND-HERE' or 'echo ...') allowed.
+9. Testing: Write the actual test command or suite run command. If there is no test framework found in the codebase, describe how to run or validate the script manually. No placeholders (like 'INSERT-TEST-COMMAND-HERE' or '{test_framework}') allowed.
+10. Roadmap: Create a Roadmap section. It must list exactly:
+    - 1 completed task that is struck off (e.g. "- [x] ~~Task name~~")
+    - 2 future features that are yet to be implemented (e.g. "- [ ] Feature name 1", "- [ ] Feature name 2")
+    Make these features realistic and directly relevant to the repository's files.
+11. Overall: Absolutely no placeholders, no "echo 'INSERT...'", no "REPLACE-ME", no templates text left. Every single section must contain real, customized, complete information.
+
+Here is the repository context:
+=== FILE LIST ===
+${repoCtx.fileTree}
+
+=== FILE CONTENTS ===
+${repoCtx.fileContents}
+
+=== DRAFT README FROM README-AI ===
+${content}
+
+Output only the updated, complete README markdown content. Do not include any conversational preamble or markdown code blocks wrap outside of the markdown itself.`,
+        config: {
+          systemInstruction: "You edit and improve README.md files to make them complete, realistic, professional, and free of placeholders, based on codebase analysis."
+        }
+      });
+      if (rewriteResponse.text) {
+        finalMarkdown = rewriteResponse.text.trim();
+        // Remove markdown wrappers if any
+        const fenceMatch = finalMarkdown.match(/```(?:markdown)?\s*\n?([\s\S]*?)\n?```/i);
+        if (fenceMatch) {
+          finalMarkdown = fenceMatch[1].trim();
+        }
+      }
+    }
+
+    res.json({ status: "success", content: finalMarkdown });
   } catch (err: any) {
     res.status(500).json({ error: err.message || "Failed to generate README" });
   } finally {
@@ -1672,7 +1852,50 @@ app.post("/api/github/push-readme", async (req, res) => {
   }
 
   try {
-    const base64Content = Buffer.from(content, "utf-8").toString("base64");
+    let finalContent = content;
+    const base64Logo = generatedLogos.get(repo);
+    if (base64Logo) {
+      // Replace the local logo endpoint URL references with relative path to logo.png
+      finalContent = content.replace(/\/api\/readme\/logo\?repo=[^"'\s)>]+/g, "./logo.png");
+
+      // Check if logo.png already exists on GitHub to obtain its SHA
+      let logoSha: string | undefined;
+      try {
+        const logoGetRes = await fetch(`https://api.github.com/repos/${repo}/contents/logo.png`, {
+          headers: {
+            Authorization: `token ${token}`,
+            "User-Agent": "CodeLore"
+          }
+        });
+        if (logoGetRes.ok) {
+          const logoData: any = await logoGetRes.json();
+          logoSha = logoData.sha;
+        }
+      } catch (e) {
+        console.warn("Failed to check logo.png existence on GitHub:", e);
+      }
+
+      // Upload logo.png to GitHub repository
+      const logoPutRes = await fetch(`https://api.github.com/repos/${repo}/contents/logo.png`, {
+        method: "PUT",
+        headers: {
+          Authorization: `token ${token}`,
+          "User-Agent": "CodeLore",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          message: "chore: upload project logo image",
+          content: base64Logo,
+          sha: logoSha
+        })
+      });
+      if (!logoPutRes.ok) {
+        const logoErr = await logoPutRes.text();
+        console.warn("Failed to upload project logo:", logoErr);
+      }
+    }
+
+    const base64Content = Buffer.from(finalContent, "utf-8").toString("base64");
     const body: any = {
       message,
       content: base64Content
