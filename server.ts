@@ -1723,10 +1723,11 @@ app.post("/api/readme/generate", async (req, res) => {
     const ai = getAI();
     let finalMarkdown = content;
     if (ai) {
-      const repoCtx = getRepositoryContext(tempDir);
-      const rewriteResponse = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: `You are an expert README generator. Re-write the following draft README file to make it perfect, professional, and fully completed.
+      try {
+        const repoCtx = getRepositoryContext(tempDir);
+        const rewriteResponse = await ai.models.generateContent({
+          model: "gemini-2.0-flash",
+          contents: `You are an expert README generator. Re-write the following draft README file to make it perfect, professional, and fully completed.
 Follow these rules strictly:
 1. Project Name: Format the repository name "${repoName || repo.split("/")[1]}" properly without special symbols or underscores (e.g. easy_deploy becomes "Easy Deploy", repo_1782114619665_nj2br becomes "Repo 1782114619665 Nj2br").
 2. Logo: Include the project logo at the top using this exact HTML tag (do not change or modify the URL):
@@ -1755,17 +1756,20 @@ ${repoCtx.fileContents}
 ${content}
 
 Output only the updated, complete README markdown content. Do not include any conversational preamble or markdown code blocks wrap outside of the markdown itself.`,
-        config: {
-          systemInstruction: "You edit and improve README.md files to make them complete, realistic, professional, and free of placeholders, based on codebase analysis."
+          config: {
+            systemInstruction: "You edit and improve README.md files to make them complete, realistic, professional, and free of placeholders, based on codebase analysis."
+          }
+        });
+        if (rewriteResponse.text) {
+          finalMarkdown = rewriteResponse.text.trim();
+          // Remove markdown wrappers if any
+          const fenceMatch = finalMarkdown.match(/```(?:markdown)?\s*\n?([\s\S]*?)\n?```/i);
+          if (fenceMatch) {
+            finalMarkdown = fenceMatch[1].trim();
+          }
         }
-      });
-      if (rewriteResponse.text) {
-        finalMarkdown = rewriteResponse.text.trim();
-        // Remove markdown wrappers if any
-        const fenceMatch = finalMarkdown.match(/```(?:markdown)?\s*\n?([\s\S]*?)\n?```/i);
-        if (fenceMatch) {
-          finalMarkdown = fenceMatch[1].trim();
-        }
+      } catch (geminiErr: any) {
+        console.error("Gemini post-processing rewrite failed:", geminiErr);
       }
     }
 

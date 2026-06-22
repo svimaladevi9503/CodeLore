@@ -352,8 +352,10 @@ export default function DocHelperView({
           emojis
         })
       });
-      if (!res.ok) throw new Error("Failed to run readme-ai generator");
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to run readme-ai generator");
+      }
       setDraftContent(data.content);
       setChatLogs([
         { sender: "gemini", text: "Successfully generated the template using readme-ai! Review the preview on the right. You can request specific text refinements or add custom sections here." }
