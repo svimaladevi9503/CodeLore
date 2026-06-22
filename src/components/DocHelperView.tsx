@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { marked } from "marked";
 import { 
   GitBranch, 
   ChevronRight, 
@@ -109,105 +110,13 @@ function CustomDropdown({ label, options, value, onChange, theme }: CustomDropdo
   );
 }
 
-function parseMarkdown(md: string) {
-  const lines = md.split("\n");
-  let inCodeBlock = false;
-  let codeContent: string[] = [];
-
-  return lines.map((line, idx) => {
-    if (line.trim().startsWith("```")) {
-      if (inCodeBlock) {
-        inCodeBlock = false;
-        const code = codeContent.join("\n");
-        codeContent = [];
-        return (
-          <pre key={idx} className="bg-slate-900 border border-slate-800 p-3 rounded-lg my-2 font-mono text-[11px] overflow-x-auto text-slate-300">
-            <code>{code}</code>
-          </pre>
-        );
-      } else {
-        inCodeBlock = true;
-        return null;
-      }
-    }
-
-    if (inCodeBlock) {
-      codeContent.push(line);
-      return null;
-    }
-
-    if (line.startsWith("# ")) {
-      return <h1 key={idx} className="text-xl font-bold border-b border-slate-800 pb-1 mt-4 mb-2 text-white">{parseInline(line.substring(2))}</h1>;
-    }
-    if (line.startsWith("## ")) {
-      return <h2 key={idx} className="text-lg font-bold mt-4 mb-2 text-slate-100">{parseInline(line.substring(3))}</h2>;
-    }
-    if (line.startsWith("### ")) {
-      return <h3 key={idx} className="text-md font-semibold mt-3 mb-1 text-slate-200">{parseInline(line.substring(4))}</h3>;
-    }
-    if (line.startsWith("#### ")) {
-      return <h4 key={idx} className="text-[13px] font-semibold mt-3 mb-1 text-slate-300">{parseInline(line.substring(5))}</h4>;
-    }
-
-    if (line.trim() === "---" || line.trim() === "***" || line.trim() === "___") {
-      return <hr key={idx} className="border-slate-800 my-4" />;
-    }
-
-    if (line.trim().startsWith("- ") || line.trim().startsWith("* ")) {
-      return (
-        <li key={idx} className="ml-4 list-disc text-slate-350 my-0.5">
-          {parseInline(line.trim().substring(2))}
-        </li>
-      );
-    }
-    if (/^\d+\.\s/.test(line.trim())) {
-      const match = line.trim().match(/^(\d+)\.\s(.*)/);
-      if (match) {
-        return (
-          <li key={idx} className="ml-4 list-decimal text-slate-350 my-0.5">
-            {parseInline(match[2])}
-          </li>
-        );
-      }
-    }
-
-    if (!line.trim()) {
-      return <div key={idx} className="h-2" />;
-    }
-
-    return <p key={idx} className="text-slate-350 my-1">{parseInline(line)}</p>;
-  });
-}
-
-function parseInline(text: string): React.ReactNode {
-  const regex = /(!\[.*?\]\(.*?\)|\[.*?\]\(.*?\)|`.*?`|\*\*.*?\*\*)/g;
-  const tokens = text.split(regex);
-
-  return tokens.map((token, i) => {
-    if (token.startsWith("![") && token.endsWith(")")) {
-      const imgMatch = token.match(/!\[(.*?)\]\((.*?)\)/);
-      if (imgMatch) {
-        return <img key={i} src={imgMatch[2]} alt={imgMatch[1]} className="inline-block my-0.5 mr-1 max-h-6" />;
-      }
-    }
-    if (token.startsWith("[") && token.endsWith(")")) {
-      const linkMatch = token.match(/\[(.*?)\]\((.*?)\)/);
-      if (linkMatch) {
-        return (
-          <a key={i} href={linkMatch[2]} target="_blank" rel="noopener noreferrer" className="text-teal-400 hover:underline">
-            {linkMatch[1]}
-          </a>
-        );
-      }
-    }
-    if (token.startsWith("`") && token.endsWith("`")) {
-      return <code key={i} className="bg-slate-900 text-teal-350 px-1 py-0.5 rounded font-mono text-[10.5px]">{token.slice(1, -1)}</code>;
-    }
-    if (token.startsWith("**") && token.endsWith("**")) {
-      return <strong key={i} className="font-bold text-white">{token.slice(2, -2)}</strong>;
-    }
-    return token;
-  });
+function parseMarkdown(md: string): string {
+  try {
+    return marked.parse(md) as string;
+  } catch (err) {
+    console.error("Markdown parsing failed", err);
+    return md;
+  }
 }
 
 interface DocHelperViewProps {
@@ -767,9 +676,10 @@ export default function DocHelperView({
                         {draftContent}
                       </pre>
                     ) : (
-                      <div className="space-y-3 font-sans select-text">
-                        {parseMarkdown(draftContent)}
-                      </div>
+                      <div 
+                        className="markdown-body select-text" 
+                        dangerouslySetInnerHTML={{ __html: parseMarkdown(draftContent) }} 
+                      />
                     )}
                   </div>
                 </div>
