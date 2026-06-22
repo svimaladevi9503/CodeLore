@@ -1,5 +1,5 @@
 import React from "react";
-import { Database, FolderOpen, RefreshCw, Layers, History, LayoutGrid, ServerCrash } from "lucide-react";
+import { Database, FolderOpen, RefreshCw, Layers, History, LayoutGrid, ServerCrash, Check, FileCode } from "lucide-react";
 import { ParcleRecord, SystemInfo } from "../types";
 
 interface VaultPanelProps {
@@ -10,6 +10,8 @@ interface VaultPanelProps {
   theme: "light" | "dark";
   vaultOpenOnMobile: boolean;
   setVaultOpenOnMobile: (val: boolean) => void;
+  activeTab?: string;
+  repoName?: string;
 }
 
 export default function VaultPanel({
@@ -19,7 +21,9 @@ export default function VaultPanel({
   setActiveTab,
   theme,
   vaultOpenOnMobile,
-  setVaultOpenOnMobile
+  setVaultOpenOnMobile,
+  activeTab,
+  repoName = "custom-docs"
 }: VaultPanelProps) {
 
   // Return synchronizer visual indicators
@@ -66,6 +70,22 @@ export default function VaultPanel({
       return 0;
     }
   }, [parcleData]);
+
+  // ─── CLEANER PATCH LOG FROM PARCLE ──────────────────────────────────────
+  const cleanerPatchLog = React.useMemo(() => {
+    if (!parcleData?.metadata) return [];
+    const key = `cleaner:patch_log:${repoName}`;
+    const log = parcleData.metadata[key];
+    return Array.isArray(log) ? log : [];
+  }, [parcleData, repoName]);
+
+  const cleanerLastScan = React.useMemo(() => {
+    if (!parcleData?.metadata) return null;
+    const key = `cleaner:last_scan:${repoName}`;
+    return parcleData.metadata[key] || null;
+  }, [parcleData, repoName]);
+
+  const isCleanerActive = activeTab === "cleaner";
 
   return (
     <div className="flex flex-col gap-6 h-full font-sans">
@@ -133,58 +153,122 @@ export default function VaultPanel({
 
           <div className="h-px bg-slate-900 border-none" />
 
-          {/* Section 2: Knowledge Index */}
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-1.5 text-[12px] font-mono text-slate-400">
-              <LayoutGrid className="h-3.5 w-3.5 text-purple-400" />
-              <span>Knowledge index</span>
-            </div>
+          {/* Section 2: Knowledge Index or Cleaner Patch Log */}
+          {isCleanerActive ? (
+            /* ─── CLEANER PATCH LOG ──────────────────────────────────── */
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-1.5 text-[12px] font-mono text-slate-400">
+                <Check className="h-3.5 w-3.5 text-emerald-400" />
+                <span>Cleaner patch log</span>
+              </div>
 
-            <div className="bg-slate-950/20 border border-slate-900 p-2.5 rounded-lg flex flex-col gap-2">
-              {pendingSyncCount > 0 && (
-                <div className="text-[10px] font-mono text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded flex items-center gap-1.5 animate-pulse select-none">
-                  <ServerCrash className="h-3 w-3" />
-                  <span>{pendingSyncCount} file pending sync</span>
+              {/* Last scan summary */}
+              {cleanerLastScan && (
+                <div className="bg-slate-950/20 border border-slate-900 p-2.5 rounded-lg flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between text-[10px] font-mono">
+                    <span className="text-slate-500">Last scan:</span>
+                    <span className="text-slate-400">
+                      {cleanerLastScan.timestamp ? new Date(cleanerLastScan.timestamp).toLocaleDateString() : "—"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] font-mono">
+                    <span className="text-slate-500">Issues found:</span>
+                    <span className="text-amber-400 font-medium">{cleanerLastScan.total_issues || 0}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px] font-mono">
+                    <span className="text-slate-500">Files scanned:</span>
+                    <span className="text-slate-300">{cleanerLastScan.files_scanned || 0}</span>
+                  </div>
                 </div>
               )}
 
-              <div className="flex items-center justify-between text-[11px] font-mono select-none">
-                <span className="text-slate-500">Stored chunks:</span>
-                <span className="text-slate-300 font-medium">{allChunks.length} memory arrays</span>
-              </div>
-
-              {/* Index health micro bar indicator */}
-              <div className="flex flex-col gap-1 mt-0.5 select-none">
-                <div className="flex justify-between items-center text-[10px] text-slate-550 font-mono">
-                  <span>Index health</span>
-                  <span className="capitalize">{indexHealth.label}</span>
+              {/* Applied patches list */}
+              {cleanerPatchLog.length === 0 ? (
+                <div className="text-[11px] text-slate-650 font-mono py-2 text-center">
+                  No patches applied yet.
                 </div>
-                <div className="h-1 bg-slate-950 rounded-full overflow-hidden w-full">
-                  <div className={`h-full ${indexHealth.style}`} />
-                </div>
-              </div>
-
-              {allChunks.length === 0 ? (
-                <div className="text-[11px] text-slate-650 font-mono py-2 text-center">No catalog indexed.</div>
               ) : (
-                <div className="space-y-1.5 border-t border-slate-900 pt-2.5 mt-1">
-                  {allChunks.slice(-5).map((ch, chIdx) => (
-                    <button
-                      type="button"
-                      key={`vault-chunk-${ch.filename}-${ch.section}-${chIdx}`}
-                      onClick={() => {
-                        setActiveTab("kb");
-                      }}
-                      className="w-full text-left truncate text-[11px] font-mono text-slate-400 hover:text-blue-400 hover:underline cursor-pointer flex items-center gap-1"
+                <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
+                  {cleanerPatchLog.slice(-8).reverse().map((patch: any, idx: number) => (
+                    <div
+                      key={`patch-${idx}`}
+                      className="p-2 bg-emerald-500/5 border border-emerald-500/20 rounded font-mono text-[10px] flex items-start gap-2"
                     >
-                      <span>📂</span>
-                      <span className="truncate">{ch.filename} › {ch.section}</span>
-                    </button>
+                      <Check className="h-3 w-3 text-emerald-400 shrink-0 mt-0.5" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-emerald-400 font-medium truncate">{patch.title || "Code fix"}</div>
+                        <div className="text-slate-500 truncate flex items-center gap-1 mt-0.5">
+                          <FileCode className="h-2.5 w-2.5" />
+                          <span>{patch.file}</span>
+                        </div>
+                        <div className="text-slate-600 mt-0.5">
+                          {patch.timestamp ? new Date(patch.timestamp).toLocaleDateString() : "—"}
+                          {patch.category && (
+                            <span className="ml-1.5 text-[8px] px-1 py-px rounded bg-slate-800 text-slate-400 uppercase">
+                              {patch.category}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
             </div>
-          </div>
+          ) : (
+            /* ─── KNOWLEDGE INDEX (default) ──────────────────────────── */
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-1.5 text-[12px] font-mono text-slate-400">
+                <LayoutGrid className="h-3.5 w-3.5 text-purple-400" />
+                <span>Knowledge index</span>
+              </div>
+
+              <div className="bg-slate-950/20 border border-slate-900 p-2.5 rounded-lg flex flex-col gap-2">
+                {pendingSyncCount > 0 && (
+                  <div className="text-[10px] font-mono text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded flex items-center gap-1.5 animate-pulse select-none">
+                    <ServerCrash className="h-3 w-3" />
+                    <span>{pendingSyncCount} file pending sync</span>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between text-[11px] font-mono select-none">
+                  <span className="text-slate-500">Stored chunks:</span>
+                  <span className="text-slate-300 font-medium">{allChunks.length} memory arrays</span>
+                </div>
+
+                {/* Index health micro bar indicator */}
+                <div className="flex flex-col gap-1 mt-0.5 select-none">
+                  <div className="flex justify-between items-center text-[10px] text-slate-550 font-mono">
+                    <span>Index health</span>
+                    <span className="capitalize">{indexHealth.label}</span>
+                  </div>
+                  <div className="h-1 bg-slate-950 rounded-full overflow-hidden w-full">
+                    <div className={`h-full ${indexHealth.style}`} />
+                  </div>
+                </div>
+
+                {allChunks.length === 0 ? (
+                  <div className="text-[11px] text-slate-650 font-mono py-2 text-center">No catalog indexed.</div>
+                ) : (
+                  <div className="space-y-1.5 border-t border-slate-900 pt-2.5 mt-1">
+                    {allChunks.slice(-5).map((ch, chIdx) => (
+                      <button
+                        type="button"
+                        key={`vault-chunk-${ch.filename}-${ch.section}-${chIdx}`}
+                        onClick={() => {
+                          setActiveTab("kb");
+                        }}
+                        className="w-full text-left truncate text-[11px] font-mono text-slate-400 hover:text-blue-400 hover:underline cursor-pointer flex items-center gap-1"
+                      >
+                        <span>📂</span>
+                        <span className="truncate">{ch.filename} › {ch.section}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="h-px bg-slate-900 border-none" />
 

@@ -35,6 +35,26 @@ export interface ScanIssue {
   patch_snippet: string;
 }
 
+export interface CleanerIssue {
+  category: 'unused_import' | 'syntax_error' | 'performance' | 'security' | 'srp' | 'readability';
+  severity: 'error' | 'warning' | 'suggestion';
+  title: string;
+  description: string;
+  file: string;
+  line_start: number;
+  line_end: number;
+  fix_snippet: string | null;
+  resolved?: boolean;
+}
+
+export interface RepoTreeNode {
+  path: string;
+  type: 'blob' | 'tree';
+  size?: number;
+  sha: string;
+  ignored?: boolean;
+}
+
 export interface WebhookResult {
   sha: string;
   branch: string;

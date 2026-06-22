@@ -918,6 +918,426 @@ app.post("/api/clean/apply", async (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
+// CLEANER AGENT V2 — FULL STATIC ANALYSIS ENGINE
+// -----------------------------------------------------------------------------
+
+// Lightweight .gitignore glob-to-regex converter
+function globToRegex(pattern: string): RegExp {
+  let neg = false;
+  let p = pattern.trim();
+  if (!p || p.startsWith('#')) return /(?!)/; // never matches
+  if (p.startsWith('!')) { neg = true; p = p.slice(1); }
+  p = p.replace(/\/$/, '');
+  let regexStr = p
+    .replace(/\./g, '\\.')
+    .replace(/\*\*/g, '{{GLOBSTAR}}')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\?/g, '[^/]')
+    .replace(/\{\{GLOBSTAR\}\}/g, '.*');
+  if (!p.includes('/')) {
+    regexStr = '(^|.*/)'+ regexStr + '(/.*)?$';
+  } else {
+    regexStr = '^' + regexStr + '(/.*)?$';
+  }
+  return new RegExp(regexStr);
+}
+
+const HARDCODED_IGNORES = [
+  'node_modules/', '.git/', 'dist/', 'build/', '.next/', '__pycache__/',
+  '*.lock', '*.log', '*.env', '*.min.js', '*.min.css', 'coverage/'
+];
+
+function isPathIgnored(filePath: string, ignorePatterns: RegExp[]): boolean {
+  for (const regex of ignorePatterns) {
+    if (regex.test(filePath)) return true;
+  }
+  return false;
+}
+
+// GET /api/cleaner/tree — Fetch project tree from GitHub with ignore filtering
+app.get("/api/cleaner/tree", async (req, res) => {
+  try {
+    if (!parcleDb.metadata) parcleDb.metadata = {};
+    const context = parcleDb.metadata["orchestrator:active_repo_context"] || {
+      active_repo: "custom-docs", active_branch: "main"
+    };
+    const owner = getGitOwner();
+    const repo = context.active_repo || "custom-docs";
+    const branch = context.active_branch || "main";
+
+    const headers: Record<string, string> = {
+      "User-Agent": "CodeLore-App",
+      "Accept": "application/vnd.github.v3+json"
+    };
+    if (process.env.GITHUB_TOKEN) {
+      headers["Authorization"] = `token ${process.env.GITHUB_TOKEN}`;
+    }
+
+    // Fetch tree
+    const treeUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
+    const treeRes = await fetch(treeUrl, { headers });
+    if (!treeRes.ok) {
+      return res.status(treeRes.status).json({ error: `GitHub tree fetch failed: ${treeRes.statusText}` });
+    }
+    const treeData = await treeRes.json();
+    const rawTree = (treeData.tree || []) as Array<{ path: string; type: string; size?: number; sha: string }>;
+
+    // Fetch .gitignore
+    let gitignorePatterns: RegExp[] = [];
+    try {
+      const giUrl = `https://api.github.com/repos/${owner}/${repo}/contents/.gitignore?ref=${branch}`;
+      const giRes = await fetch(giUrl, { headers });
+      if (giRes.ok) {
+        const giData = await giRes.json();
+        if (giData.content) {
+          const giContent = Buffer.from(giData.content, giData.encoding || 'base64').toString('utf8');
+          const lines = giContent.split(/\r?\n/).filter(l => l.trim() && !l.startsWith('#'));
+          gitignorePatterns = lines.map(l => globToRegex(l));
+        }
+      }
+    } catch (e) { /* .gitignore is optional */ }
+
+    // Add hardcoded ignores
+    const hardcodedRegexes = HARDCODED_IGNORES.map(p => globToRegex(p));
+    const allIgnorePatterns = [...gitignorePatterns, ...hardcodedRegexes];
+
+    let ignoredCount = 0;
+    const tree = rawTree.map(node => {
+      const ignored = isPathIgnored(node.path, allIgnorePatterns);
+      if (ignored) ignoredCount++;
+      return {
+        path: node.path,
+        type: node.type as 'blob' | 'tree',
+        size: node.size,
+        sha: node.sha,
+        ignored
+      };
+    });
+
+    res.json({
+      status: "success",
+      tree,
+      total_count: tree.filter(n => n.type === 'blob').length,
+      ignored_count: ignoredCount,
+      repo,
+      branch,
+      owner
+    });
+  } catch (err: any) {
+    console.error("Cleaner tree fetch error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/cleaner/file-content — Fetch raw file content from GitHub
+app.get("/api/cleaner/file-content", async (req, res) => {
+  try {
+    const filePath = req.query.path as string;
+    if (!filePath) return res.status(400).json({ error: "Missing path" });
+
+    if (!parcleDb.metadata) parcleDb.metadata = {};
+    const context = parcleDb.metadata["orchestrator:active_repo_context"] || {
+      active_repo: "custom-docs", active_branch: "main"
+    };
+    const owner = getGitOwner();
+    const repo = context.active_repo || "custom-docs";
+    const branch = context.active_branch || "main";
+
+    const headers: Record<string, string> = {
+      "User-Agent": "CodeLore-App",
+      "Accept": "application/vnd.github.v3+json"
+    };
+    if (process.env.GITHUB_TOKEN) {
+      headers["Authorization"] = `token ${process.env.GITHUB_TOKEN}`;
+    }
+
+    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${branch}`;
+    const ghRes = await fetch(url, { headers });
+    if (!ghRes.ok) {
+      return res.status(ghRes.status).json({ error: `GitHub file fetch failed: ${ghRes.statusText}` });
+    }
+    const data = await ghRes.json();
+    if (!data.content) {
+      return res.status(400).json({ error: "No content in file" });
+    }
+    const content = Buffer.from(data.content, data.encoding || 'base64').toString('utf8');
+    res.json({ status: "success", content, sha: data.sha, size: data.size });
+  } catch (err: any) {
+    console.error("Cleaner file content error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/cleaner/scan — Gemini-powered 6-category analysis with concurrency control
+app.post("/api/cleaner/scan", async (req, res) => {
+  try {
+    const { files, repo } = req.body as { files: Array<{ path: string; sha: string }>; repo: string };
+    if (!files || !Array.isArray(files)) {
+      return res.status(400).json({ error: "Missing files array" });
+    }
+
+    if (!parcleDb.metadata) parcleDb.metadata = {};
+    const context = parcleDb.metadata["orchestrator:active_repo_context"] || {
+      active_repo: "custom-docs", active_branch: "main"
+    };
+    const owner = getGitOwner();
+    const repoName = repo || context.active_repo || "custom-docs";
+    const branch = context.active_branch || "main";
+
+    // Read existing patch log to skip already-fixed issues
+    const patchLogKey = `cleaner:patch_log:${repoName}`;
+    const patchLog: any[] = Array.isArray(parcleDb.metadata[patchLogKey]) ? parcleDb.metadata[patchLogKey] : [];
+
+    const headers: Record<string, string> = {
+      "User-Agent": "CodeLore-App",
+      "Accept": "application/vnd.github.v3+json"
+    };
+    if (process.env.GITHUB_TOKEN) {
+      headers["Authorization"] = `token ${process.env.GITHUB_TOKEN}`;
+    }
+
+    const ai = getAI();
+    const allIssues: any[] = [];
+    let cacheHits = 0;
+
+    // Semaphore for max 5 concurrent Gemini calls
+    const MAX_CONCURRENT = 5;
+    let running = 0;
+    const queue: Array<() => Promise<void>> = [];
+
+    const runNext = () => {
+      while (running < MAX_CONCURRENT && queue.length > 0) {
+        running++;
+        const task = queue.shift()!;
+        task().finally(() => {
+          running--;
+          runNext();
+        });
+      }
+    };
+
+    const scanPromises: Promise<void>[] = [];
+
+    for (const file of files) {
+      const cacheKey = `cleaner:file_cache:${repoName}:${file.path}:${file.sha}`;
+
+      // Check cache
+      if (parcleDb.metadata[cacheKey]) {
+        const cached = parcleDb.metadata[cacheKey];
+        if (Array.isArray(cached.issues)) {
+          allIssues.push(...cached.issues);
+          cacheHits++;
+          continue;
+        }
+      }
+
+      const p = new Promise<void>((resolve) => {
+        const task = async () => {
+          try {
+            // Fetch file content
+            const url = `https://api.github.com/repos/${owner}/${repoName}/contents/${file.path}?ref=${branch}`;
+            const ghRes = await fetch(url, { headers });
+            if (!ghRes.ok) { resolve(); return; }
+            const data = await ghRes.json();
+            if (!data.content) { resolve(); return; }
+            const content = Buffer.from(data.content, data.encoding || 'base64').toString('utf8');
+
+            let issues: any[] = [];
+
+            if (ai) {
+              try {
+                const response = await ai.models.generateContent({
+                  model: "gemini-2.0-flash",
+                  contents: `File: ${file.path}\nContent:\n${content}`,
+                  config: {
+                    systemInstruction: `You are a senior code reviewer. Analyze the provided source file and return a JSON array of issues only — no prose, no markdown. Each issue must follow this schema:
+{
+  "category": "unused_import" | "syntax_error" | "performance" | "security" | "srp" | "readability",
+  "severity": "error" | "warning" | "suggestion",
+  "title": "string (max 60 chars)",
+  "description": "string (max 120 chars)",
+  "file": "string",
+  "line_start": number,
+  "line_end": number,
+  "fix_snippet": "string | null (provide corrected code if fix is straightforward)"
+}
+
+CATEGORY RULES:
+UNUSED_IMPORT: Any import not referenced anywhere in the file body. Named imports where only some members are used (flag the unused members specifically). Default imports that are never called/rendered.
+SYNTAX_ERROR: Missing semicolons (if file uses them consistently). Unclosed brackets/parentheses/tags. Type errors (TS files): mismatched types, missing return types on exported functions. Undefined variables used before declaration.
+PERFORMANCE: useEffect with missing/wrong dependency arrays (React). Expensive operations inside render/return blocks. Unnecessary re-renders (inline object/function creation in JSX props). Missing useMemo/useCallback where clearly beneficial. Synchronous file reads or blocking I/O.
+SECURITY: Hardcoded secrets, tokens, passwords, API keys. dangerouslySetInnerHTML usage (XSS risk). eval() or Function() calls. Unvalidated user input passed to SQL/shell/exec. console.log() left in production code with sensitive data.
+SRP (Single Responsibility): Functions > 40 lines doing multiple distinct tasks. Components that fetch data AND render AND handle form logic. Files > 200 lines mixing unrelated concerns.
+READABILITY: Variable names: single-letter (except loop counters), cryptic abbreviations, misleading names. Magic numbers/strings not assigned to named constants. Deeply nested if/else (> 3 levels) that could be early-returned or extracted. Missing JSDoc/docstrings on exported functions. Dead code (unreachable code after return/throw).
+
+Return [] if no issues found. Never return null. Return ONLY valid JSON — no markdown fences, no backticks, no prose.`
+                  }
+                });
+                const text = (response.text || "").trim();
+                // Parse the JSON from the response — strip markdown fences if present
+                let jsonStr = text;
+                const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+                if (fenceMatch) jsonStr = fenceMatch[1].trim();
+                try {
+                  const parsed = JSON.parse(jsonStr);
+                  if (Array.isArray(parsed)) {
+                    issues = parsed.map((iss: any) => ({
+                      ...iss,
+                      file: file.path
+                    }));
+                  }
+                } catch (parseErr) {
+                  console.error(`Failed to parse Gemini response for ${file.path}:`, parseErr);
+                }
+              } catch (gemErr) {
+                console.error(`Gemini scan failed for ${file.path}:`, gemErr);
+              }
+            }
+
+            // Filter out already-patched issues
+            const filteredIssues = issues.filter((iss: any) => {
+              return !patchLog.some((patch: any) =>
+                patch.file === iss.file &&
+                patch.line_start === iss.line_start &&
+                patch.title === iss.title
+              );
+            });
+
+            // Cache results
+            parcleDb.metadata[cacheKey] = { issues: filteredIssues, cached_at: new Date().toISOString() };
+            allIssues.push(...filteredIssues);
+          } catch (err) {
+            console.error(`Scan error for ${file.path}:`, err);
+          }
+          resolve();
+        };
+        queue.push(task);
+      });
+      scanPromises.push(p);
+    }
+
+    // Start the semaphore
+    runNext();
+    await Promise.all(scanPromises);
+
+    // Write scan results to Parcle
+    const timestamp = new Date().toISOString();
+    parcleDb.metadata[`cleaner:scan:${repoName}:${timestamp}`] = allIssues;
+    parcleDb.metadata[`cleaner:last_scan:${repoName}`] = {
+      timestamp,
+      total_issues: allIssues.length,
+      files_scanned: files.length,
+      resolved_count: 0
+    };
+    await saveParcle();
+
+    res.json({
+      status: "success",
+      issues: allIssues,
+      files_scanned: files.length,
+      cache_hits: cacheHits,
+      timestamp
+    });
+  } catch (err: any) {
+    console.error("Cleaner scan error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/cleaner/apply-fix — Apply a single fix via GitHub API commit
+app.post("/api/cleaner/apply-fix", async (req, res) => {
+  try {
+    const { file: filePath, fix_snippet, line_start, line_end, category, title, repo, branch: reqBranch } = req.body;
+    if (!filePath || !fix_snippet) {
+      return res.status(400).json({ error: "Missing file or fix_snippet" });
+    }
+
+    if (!parcleDb.metadata) parcleDb.metadata = {};
+    const context = parcleDb.metadata["orchestrator:active_repo_context"] || {
+      active_repo: "custom-docs", active_branch: "main"
+    };
+    const owner = getGitOwner();
+    const repoName = repo || context.active_repo || "custom-docs";
+    const branch = reqBranch || context.active_branch || "main";
+
+    const headers: Record<string, string> = {
+      "User-Agent": "CodeLore-App",
+      "Accept": "application/vnd.github.v3+json"
+    };
+    if (process.env.GITHUB_TOKEN) {
+      headers["Authorization"] = `token ${process.env.GITHUB_TOKEN}`;
+    }
+
+    // Fetch current file
+    const getUrl = `https://api.github.com/repos/${owner}/${repoName}/contents/${filePath}?ref=${branch}`;
+    const getRes = await fetch(getUrl, { headers });
+    if (!getRes.ok) {
+      return res.status(getRes.status).json({ error: `Failed to fetch file: ${getRes.statusText}` });
+    }
+    const fileData = await getRes.json();
+    const currentContent = Buffer.from(fileData.content, fileData.encoding || 'base64').toString('utf8');
+    const lines = currentContent.split('\n');
+
+    // Replace lines line_start to line_end with fix_snippet
+    const before = lines.slice(0, (line_start || 1) - 1);
+    const after = lines.slice(line_end || line_start || 1);
+    const newContent = [...before, fix_snippet, ...after].join('\n');
+    const encodedContent = Buffer.from(newContent).toString('base64');
+
+    // Commit via GitHub API
+    const commitMessage = `fix(${category || 'code'}): ${title || 'code cleanup'} — by CodeLore Cleaner`;
+    const putUrl = `https://api.github.com/repos/${owner}/${repoName}/contents/${filePath}`;
+    const putRes = await fetch(putUrl, {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: commitMessage,
+        content: encodedContent,
+        sha: fileData.sha,
+        branch
+      })
+    });
+
+    if (!putRes.ok) {
+      const errText = await putRes.text();
+      return res.status(putRes.status).json({ error: `GitHub commit failed: ${errText}` });
+    }
+
+    // Append to patch log in Parcle
+    const patchLogKey = `cleaner:patch_log:${repoName}`;
+    if (!Array.isArray(parcleDb.metadata[patchLogKey])) {
+      parcleDb.metadata[patchLogKey] = [];
+    }
+    parcleDb.metadata[patchLogKey].push({
+      file: filePath,
+      line_start,
+      line_end,
+      category,
+      title,
+      fix_snippet,
+      timestamp: new Date().toISOString(),
+      commit_message: commitMessage
+    });
+    await saveParcle();
+
+    res.json({ status: "success", commit_message: commitMessage });
+  } catch (err: any) {
+    console.error("Cleaner apply-fix error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/cleaner/patch-log — Read patch log from Parcle
+app.get("/api/cleaner/patch-log", (req, res) => {
+  const repo = (req.query.repo as string) || "custom-docs";
+  if (!parcleDb.metadata) parcleDb.metadata = {};
+  const patchLogKey = `cleaner:patch_log:${repo}`;
+  const log = Array.isArray(parcleDb.metadata[patchLogKey]) ? parcleDb.metadata[patchLogKey] : [];
+  const lastScan = parcleDb.metadata[`cleaner:last_scan:${repo}`] || null;
+  res.json({ status: "success", log, last_scan: lastScan });
+});
+
+// -----------------------------------------------------------------------------
 // WEBHOOK & DOCUMENTATION HELPER ROUTING WITH POPUP APPROVAL
 // -----------------------------------------------------------------------------
 

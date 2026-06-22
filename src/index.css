@@ -289,3 +289,54 @@
 .light-mode .markdown-body th, .light-mode .markdown-body td {
   border-color: #e2e8f0;
 }
+
+/* ─── CLEANER AGENT STYLES ──────────────────────────────────────────────── */
+
+/* Todo card hover lift effect */
+.cleaner-todo-card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.cleaner-todo-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Scan progress bar shimmer */
+@keyframes cleaner-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.cleaner-progress-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.15) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: cleaner-shimmer 1.5s infinite;
+}
+
+/* Fade-in animation for todo cards */
+@keyframes cleaner-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.cleaner-todo-card {
+  animation: cleaner-fade-in 0.25s ease forwards;
+}
+
+/* Light mode cleaner overrides */
+.light-mode .cleaner-todo-card {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+.light-mode .cleaner-todo-card:hover {
+  box-shadow: 0 3px 15px rgba(0, 0, 0, 0.08);
+}
+
+/* Code viewer line highlight pulse */
+@keyframes line-highlight-pulse {
+  0%, 100% { background-color: rgba(245, 158, 11, 0.08); }
+  50% { background-color: rgba(245, 158, 11, 0.18); }
+}
+

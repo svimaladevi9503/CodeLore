@@ -1302,20 +1302,9 @@ export default function App() {
                   transition={{ duration: 0.15 }}
                 >
                   <CleanerAgentView
-                    cleanerCode={cleanerState.cleanerCode}
-                    setCleanerCode={(val) => dispatchCleaner({ type: "SET_CODE", value: val })}
-                    scanWholeWorkspace={cleanerState.scanWholeWorkspace}
-                    setScanWholeWorkspace={(val) => dispatchCleaner({ type: "SET_SCAN_WHOLE", value: val })}
-                    autoApplyPatch={cleanerState.autoApplyPatch}
-                    setAutoApplyPatch={(val) => dispatchCleaner({ type: "SET_AUTO_APPLY", value: val })}
-                    triggerCleanerScan={triggerCleanerScan}
-                    cleanerLoading={cleanerState.cleanerLoading}
-                    scannedIssues={cleanerState.scannedIssues}
-                    scannedPatchId={cleanerState.scannedPatchId}
-                    scannedPatchText={cleanerState.scannedPatchText}
-                    applyCleanerPatch={applyCleanerPatch}
-                    isPatchApplied={cleanerState.isPatchApplied}
-                    renderedIssues={cleanerState.renderedIssues}
+                    theme={uiState.theme}
+                    repoName={activeRepoName || docHelperState.repoName || "custom-docs"}
+                    owner=""
                   />
                 </m.div>
               )}
@@ -1333,6 +1322,8 @@ export default function App() {
               theme={uiState.theme}
               vaultOpenOnMobile={uiState.vaultOpenOnMobile}
               setVaultOpenOnMobile={(val) => dispatchUi({ type: "SET_VAULT_MOBILE", value: val })}
+              activeTab={uiState.activeTab}
+              repoName={activeRepoName || docHelperState.repoName || "custom-docs"}
             />
           </aside>
 
@@ -1359,6 +1350,8 @@ export default function App() {
                 theme={uiState.theme}
                 vaultOpenOnMobile={uiState.vaultOpenOnMobile}
                 setVaultOpenOnMobile={(val) => dispatchUi({ type: "SET_VAULT_MOBILE", value: val })}
+                activeTab={uiState.activeTab}
+                repoName={activeRepoName || docHelperState.repoName || "custom-docs"}
               />
             </div>
           )}
