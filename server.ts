@@ -421,10 +421,28 @@ async function saveParcle(): Promise<boolean> {
 let aiClient: any = null;
 let groqClient: Groq | null = null;
 const GROQ_MODEL = "llama-3.3-70b-versatile";
+let fileEnvCache: Record<string, string> | null = null;
+
+function getConfiguredEnvVar(name: string): string {
+  if (process.env[name]) return process.env[name] as string;
+  if (!fileEnvCache) {
+    try {
+      const envPath = path.join(process.cwd(), ".env");
+      if (fs.existsSync(envPath)) {
+        fileEnvCache = dotenv.parse(fs.readFileSync(envPath, "utf-8"));
+      } else {
+        fileEnvCache = {};
+      }
+    } catch {
+      fileEnvCache = {};
+    }
+  }
+  return fileEnvCache[name] || "";
+}
 
 function getAI() {
   if (!aiClient) {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = getConfiguredEnvVar("GEMINI_API_KEY");
     if (!apiKey) {
       console.warn("GEMINI_API_KEY missing. Mock fallback mode active.");
       return null;
@@ -443,9 +461,9 @@ function getAI() {
 
 function getGroq() {
   if (!groqClient) {
-    const apiKey = process.env.GROQ_API_KEY;
+    const apiKey = getConfiguredEnvVar("GROQ_API_KEY");
     if (!apiKey) {
-      console.warn("GROQ_API_KEY missing. Groq README flows unavailable.");
+      console.warn("GROQ_API_KEY missing. Groq flows unavailable.");
       return null;
     }
     groqClient = new Groq({ apiKey });
@@ -479,6 +497,20 @@ function getGeminiFriendlyError(err: unknown): string {
     return "Gemini quota reached. Add billing, switch API key, or retry after quota reset.";
   }
   return getErrorMessage(err);
+}
+
+function getProviderFriendlyError(err: unknown, provider: "groq" | "gemini"): string {
+  const message = getErrorMessage(err).toLowerCase();
+  if (provider === "groq") {
+    if (message.includes("rate limit") || message.includes("too many requests") || message.includes("\"code\":429")) {
+      return "Groq rate limit reached. Retry shortly or switch API key.";
+    }
+    if (message.includes("api key") || message.includes("authentication") || message.includes("unauthorized")) {
+      return "Groq API key invalid or unavailable.";
+    }
+    return getErrorMessage(err);
+  }
+  return getGeminiFriendlyError(err);
 }
 
 async function generateGroqText(params: {
@@ -2528,6 +2560,7 @@ app.post("/api/kb/query", async (req, res) => {
     await appendHistory("user", query);
 
     let finalAnswer = "";
+    let attemptedProvider: "groq" | "gemini" = "groq";
     const systemPrompt = `You are CodeLore, an intelligent codebase assistant for the repo ${repo_name}. Answer from the live repository context provided. Be concise, accurate, and specific. Prefer concrete stack names, file names, and commands when relevant. End answers with a short source line in this format: › Source: {filename1}, {filename2}`;
 
     let userPromptContent = "";
@@ -2542,12 +2575,14 @@ app.post("/api/kb/query", async (req, res) => {
 
     try {
       if (getGroq()) {
+        attemptedProvider = "groq";
         finalAnswer = await generateGroqText({
           system: systemPrompt,
           user: userPromptContent,
           temperature: 0.2
         });
       } else {
+        attemptedProvider = "gemini";
         const ai = getAI();
         if (!ai) {
           throw new Error("No AI client initialized");
@@ -2564,7 +2599,7 @@ app.post("/api/kb/query", async (req, res) => {
     } catch (modelErr: any) {
       console.error("Direct repo answer failed", modelErr);
       const sourceList = sources.slice(0, 2).map(src => src.filename).join(", ") || "README.md, package.json";
-      finalAnswer = `${getGeminiFriendlyError(modelErr)}\n\nI can answer from live repo files once a working AI provider is available.\n\n› Source: ${sourceList}`;
+      finalAnswer = `${getProviderFriendlyError(modelErr, attemptedProvider)}\n\nI can answer from live repo files once a working AI provider is available.\n\n› Source: ${sourceList}`;
     }
 
     const words = finalAnswer.split(" ");
