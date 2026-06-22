@@ -408,125 +408,146 @@ export default function KnowledgeBaseView({
       )}
 
       {/* Conversational Screen container */}
-      <div className="flex-1 bg-slate-950/40 border border-slate-850 rounded-xl flex flex-col min-h-[300px] overflow-hidden relative">
-        {/* Repo switched banner */}
-        {switchBanner?.show && (
-          <div className="bg-teal-600/90 backdrop-blur-xs text-white px-4 py-2 text-[12px] flex items-center justify-between border-b border-teal-500/30 z-20 shrink-0 select-none animate-fade-in">
-            <span className="font-sans font-medium">Repo switched to {switchBanner.repoName}. Refreshing knowledge...</span>
+      {!repoName || repoName === "None selected" || repoName === "" ? (
+        <div className="flex-1 bg-slate-950/40 border border-slate-850 rounded-xl flex flex-col items-center justify-center p-8 text-center min-h-[300px]">
+          <div className="flex items-center gap-2 text-slate-500 mb-2">
+            <svg viewBox="0 0 16 16" width="32" height="32" fill="currentColor" className="text-slate-600 animate-pulse">
+              <path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.35 3.12.88.01.47.01.84.01.93 0 .22-.16.47-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/>
+            </svg>
+            <span className="text-2xl font-mono text-slate-500">:</span>
+            <svg viewBox="0 0 10 10" width="32" height="32" className="text-teal-400 fill-current animate-bounce" style={{ imageRendering: 'pixelated' }}>
+              <rect x="2" y="2" width="2" height="2" />
+              <rect x="6" y="2" width="2" height="2" />
+              <rect x="2" y="6" width="1" height="1" />
+              <rect x="7" y="6" width="1" height="1" />
+              <rect x="3" y="7" width="4" height="1" />
+            </svg>
+          </div>
+          <h4 className="text-[14px] font-sans font-medium text-white mt-4">
+            Please select a repository to start the Conversation!
+          </h4>
+        </div>
+      ) : (
+        <div className="flex-1 bg-slate-950/40 border border-slate-850 rounded-xl flex flex-col min-h-[300px] overflow-hidden relative">
+          {/* Repo switched banner */}
+          {switchBanner?.show && (
+            <div className="bg-teal-600/90 backdrop-blur-xs text-white px-4 py-2 text-[12px] flex items-center justify-between border-b border-teal-500/30 z-20 shrink-0 select-none animate-fade-in">
+              <span className="font-sans font-medium">Repo switched to {switchBanner.repoName}. Refreshing knowledge...</span>
+              <button
+                onClick={() => setSwitchBanner && setSwitchBanner({ show: false, repoName: "" })}
+                className="text-teal-200 hover:text-white p-1 rounded transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            
+            {chatLog.length === 0 && !chatLoading && (
+              <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-500">
+                <FileText className="h-8 w-8 text-slate-700 mb-2 animate-pulse" />
+                <p className="text-[12px] font-sans font-normal">
+                  Ask anything about your codebase. CodeLore will find it.
+                </p>
+              </div>
+            )}
+
+            {/* Render 3-ring loader if querying but first token not arrived yet */}
+            {chatLoading && !firstTokenReceived && (
+              <RippleLoader />
+            )}
+
+            {chatItems.length > 0 && chatItems.map((item) => {
+              const msg = item.msg;
+              const isUser = msg.sender === "user";
+
+              return (
+                <div 
+                  key={item.id} 
+                  className={`flex flex-col max-w-[85%] ${
+                    isUser ? "ml-auto items-end" : "mr-auto items-start animate-fade-in"
+                  }`}
+                >
+                  <div className={`p-3 rounded-lg text-[12px] leading-relaxed ${
+                    isUser 
+                      ? 'bg-[#1D9E75]/20 border border-[#1D9E75]/30 text-white rounded-br-none font-sans font-normal' 
+                      : 'bg-slate-900 border border-slate-800 text-slate-300 rounded-bl-none font-sans font-normal'
+                  }`}>
+                    <p className="whitespace-pre-wrap">{msg.text}</p>
+                    
+                    {/* Sources compact badges instead of confidence rating bar */}
+                    {!isUser && msg.sources && msg.sources.length > 0 && (
+                      <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex flex-wrap gap-1.5 select-none">
+                        {msg.sources.map((src: any) => {
+                          const citationText = `[Citation context chunk from ${src.filename} › ${src.section}]: All active properties or system models registered under Parcle keys will query this index matrix to fulfill instructions safely without external leakage bounds.`;
+                          return (
+                            <button
+                              type="button"
+                              key={`citation-${src.filename}-${src.section}`}
+                              onClick={async () => {
+                                setActiveCitationText(citationText);
+                                try {
+                                  const res = await fetch("/api/orchestrate/context", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ last_indexed_file: src.filename })
+                                  });
+                                  const data = await res.json();
+                                  if (data.status === "success" && data.context) {
+                                    setRepoContext(data.context);
+                                  }
+                                } catch (err) {
+                                  console.error("Failed to sync clicked file citation to backend:", err);
+                                }
+                              }}
+                              className="text-[10px] bg-teal-500/10 border border-teal-500/20 px-2.5 py-0.5 rounded-full text-teal-400 font-mono hover:bg-teal-500/20 hover:text-teal-300 transition inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
+                            >
+                              <span>📂</span>
+                              <span>{src.filename} › {src.section}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-mono mt-1.5">{msg.timestamp}</span>
+                </div>
+              );
+            })}
+
+            {/* RAG search loading loader fallback */}
+            {chatLoading && firstTokenReceived && (
+              <div className="mr-auto items-start max-w-[80%] flex flex-col animate-pulse">
+                <div className="p-3 rounded-lg text-[12px] bg-slate-900 border border-slate-800 text-slate-400 rounded-bl-none flex items-center gap-2">
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-blue-400" />
+                  <span className="font-sans font-normal">Streaming reply from Parcle arrays...</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Floating Input row pinned at bottom */}
+          <div className="p-3 border-t border-slate-850 bg-slate-900/10 flex gap-2 shrink-0">
+            <input
+              type="text"
+              placeholder="Ask CodeLore: e.g. What is the Orchestrator Agent?"
+              value={userQuery}
+              onChange={(e) => setUserQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && queryKnowledgeBase()}
+              aria-label="Ask CodeLore question"
+              className="flex-1 bg-slate-950 border border-slate-800 rounded-lg text-[12px] font-sans font-normal px-3 focus:border-blue-500 outline-none text-slate-200 placeholder-slate-600 leading-none h-10"
+            />
             <button
-              onClick={() => setSwitchBanner && setSwitchBanner({ show: false, repoName: "" })}
-              className="text-teal-200 hover:text-white p-1 rounded transition"
+              type="button"
+              onClick={queryKnowledgeBase}
+              className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-[12px] font-medium cursor-pointer transition active:scale-95"
             >
-              <X className="h-4 w-4" />
+              Send
             </button>
           </div>
-        )}
-
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          
-          {chatLog.length === 0 && !chatLoading && (
-            <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-500">
-              <FileText className="h-8 w-8 text-slate-700 mb-2 animate-pulse" />
-              <p className="text-[12px] font-sans font-normal">
-                Ask anything about your codebase. CodeLore will find it.
-              </p>
-            </div>
-          )}
-
-          {/* Render 3-ring loader if querying but first token not arrived yet */}
-          {chatLoading && !firstTokenReceived && (
-            <RippleLoader />
-          )}
-
-          {chatItems.length > 0 && chatItems.map((item) => {
-            const msg = item.msg;
-            const isUser = msg.sender === "user";
-
-            return (
-              <div 
-                key={item.id} 
-                className={`flex flex-col max-w-[85%] ${
-                  isUser ? "ml-auto items-end" : "mr-auto items-start animate-fade-in"
-                }`}
-              >
-                <div className={`p-3 rounded-lg text-[12px] leading-relaxed ${
-                  isUser 
-                    ? 'bg-[#1D9E75]/20 border border-[#1D9E75]/30 text-white rounded-br-none font-sans font-normal' 
-                    : 'bg-slate-900 border border-slate-800 text-slate-300 rounded-bl-none font-sans font-normal'
-                }`}>
-                  <p className="whitespace-pre-wrap">{msg.text}</p>
-                  
-                  {/* Sources compact badges instead of confidence rating bar */}
-                  {!isUser && msg.sources && msg.sources.length > 0 && (
-                    <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex flex-wrap gap-1.5 select-none">
-                      {msg.sources.map((src: any) => {
-                        const citationText = `[Citation context chunk from ${src.filename} › ${src.section}]: All active properties or system models registered under Parcle keys will query this index matrix to fulfill instructions safely without external leakage bounds.`;
-                        return (
-                          <button
-                            type="button"
-                            key={`citation-${src.filename}-${src.section}`}
-                            onClick={async () => {
-                              setActiveCitationText(citationText);
-                              try {
-                                const res = await fetch("/api/orchestrate/context", {
-                                  method: "POST",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({ last_indexed_file: src.filename })
-                                });
-                                const data = await res.json();
-                                if (data.status === "success" && data.context) {
-                                  setRepoContext(data.context);
-                                }
-                              } catch (err) {
-                                console.error("Failed to sync clicked file citation to backend:", err);
-                              }
-                            }}
-                            className="text-[10px] bg-teal-500/10 border border-teal-500/20 px-2.5 py-0.5 rounded-full text-teal-400 font-mono hover:bg-teal-500/20 hover:text-teal-300 transition inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
-                          >
-                            <span>📂</span>
-                            <span>{src.filename} › {src.section}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-                <span className="text-[10px] text-slate-500 font-mono mt-1.5">{msg.timestamp}</span>
-              </div>
-            );
-          })}
-
-          {/* RAG search loading loader fallback */}
-          {chatLoading && firstTokenReceived && (
-            <div className="mr-auto items-start max-w-[80%] flex flex-col animate-pulse">
-              <div className="p-3 rounded-lg text-[12px] bg-slate-900 border border-slate-800 text-slate-400 rounded-bl-none flex items-center gap-2">
-                <RefreshCw className="h-3.5 w-3.5 animate-spin text-blue-400" />
-                <span className="font-sans font-normal">Streaming reply from Parcle arrays...</span>
-              </div>
-            </div>
-          )}
         </div>
-
-        {/* Floating Input row pinned at bottom */}
-        <div className="p-3 border-t border-slate-850 bg-slate-900/10 flex gap-2 shrink-0">
-          <input
-            type="text"
-            placeholder="Ask CodeLore: e.g. What is the Orchestrator Agent?"
-            value={userQuery}
-            onChange={(e) => setUserQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && queryKnowledgeBase()}
-            aria-label="Ask CodeLore question"
-            className="flex-1 bg-slate-950 border border-slate-800 rounded-lg text-[12px] font-sans font-normal px-3 focus:border-blue-500 outline-none text-slate-200 placeholder-slate-600 leading-none h-10"
-          />
-          <button
-            type="button"
-            onClick={queryKnowledgeBase}
-            className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-[12px] font-medium cursor-pointer transition active:scale-95"
-          >
-            Send
-          </button>
-        </div>
-      </div>
+      )}
 
       {/* Floating Side Drawer details when clicking dynamic citations */}
       <AnimatePresence>
