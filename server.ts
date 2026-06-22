@@ -41,6 +41,7 @@ let parcleDb: {
   clean_patches: Record<string, { file: string; patch: string; timestamp: string; applied: boolean; issues?: any[] }>;
   pipeline_runs: Array<{ id: string; name: string; status: string; timestamp: string; log: string }>;
   routing_events: Array<{ id: string; timestamp: string; eventType: string; payload: string; route: string; confidence: number; outcome: string; failed?: boolean }>;
+  metadata?: Record<string, any>;
 } = {
   readmes: {},
   prs: {},
@@ -48,7 +49,8 @@ let parcleDb: {
   qa_logs: [],
   clean_patches: {},
   pipeline_runs: [],
-  routing_events: []
+  routing_events: [],
+  metadata: {}
 };
 
 // Seed default documentation chunks for Knowledge Base Agent RAG
@@ -203,7 +205,12 @@ async function loadParcle() {
     try {
       if (fs.existsSync(PARCLE_FILE_PATH)) {
         const data = fs.readFileSync(PARCLE_FILE_PATH, 'utf-8');
-        parcleDb = JSON.parse(data);
+        const parsed = JSON.parse(data);
+        parcleDb = {
+          ...parcleDb,
+          ...parsed,
+          metadata: parsed.metadata || {}
+        };
       } else {
         await saveParcle();
       }
@@ -894,6 +901,18 @@ app.post("/api/approve-readme", async (req, res) => {
     }
   });
 
+  if (!parcleDb.metadata) {
+    parcleDb.metadata = {};
+  }
+  if (!parcleDb.metadata["orchestrator:active_repo_context"]) {
+    parcleDb.metadata["orchestrator:active_repo_context"] = {
+      active_repo: "custom-docs",
+      active_branch: "main",
+      last_indexed_file: "README.md"
+    };
+  }
+  parcleDb.metadata["orchestrator:active_repo_context"].last_indexed_file = "README.md";
+
   await saveParcle();
 
   res.json({
@@ -1082,6 +1101,19 @@ app.post("/api/rag/add-chunk", async (req, res) => {
 
   const id = `chunk_custom_${Date.now()}`;
   parcleDb.v_store.push({ id, filename, section, content });
+
+  if (!parcleDb.metadata) {
+    parcleDb.metadata = {};
+  }
+  if (!parcleDb.metadata["orchestrator:active_repo_context"]) {
+    parcleDb.metadata["orchestrator:active_repo_context"] = {
+      active_repo: "custom-docs",
+      active_branch: "main",
+      last_indexed_file: "README.md"
+    };
+  }
+  parcleDb.metadata["orchestrator:active_repo_context"].last_indexed_file = filename;
+
   await saveParcle();
 
   // Ingest to Parcle Memory API
@@ -1299,6 +1331,74 @@ app.get("/api/orchestrate/events", (req, res) => {
   res.json({
     status: "success",
     events: parcleDb.routing_events
+  });
+});
+
+function getGitOwner(): string {
+  let remoteUrl = "";
+  try {
+    remoteUrl = execSync("git config --get remote.origin.url", { cwd: process.cwd() }).toString().trim();
+  } catch (e) {}
+  
+  if (remoteUrl) {
+    const match = remoteUrl.match(/(?:github\.com[:/])([^/]+)/);
+    if (match && match[1]) {
+      return match[1];
+    }
+  }
+  return "svimaladevi9503";
+}
+
+app.get("/api/orchestrate/context", (req, res) => {
+  if (!parcleDb.metadata) {
+    parcleDb.metadata = {};
+  }
+  if (!parcleDb.metadata["orchestrator:active_repo_context"]) {
+    parcleDb.metadata["orchestrator:active_repo_context"] = {
+      active_repo: "custom-docs",
+      active_branch: "main",
+      last_indexed_file: "README.md"
+    };
+  }
+  res.json({
+    status: "success",
+    context: {
+      ...parcleDb.metadata["orchestrator:active_repo_context"],
+      owner: getGitOwner()
+    }
+  });
+});
+
+app.post("/api/orchestrate/context", async (req, res) => {
+  if (!parcleDb.metadata) {
+    parcleDb.metadata = {};
+  }
+  if (!parcleDb.metadata["orchestrator:active_repo_context"]) {
+    parcleDb.metadata["orchestrator:active_repo_context"] = {
+      active_repo: "custom-docs",
+      active_branch: "main",
+      last_indexed_file: "README.md"
+    };
+  }
+  
+  const { active_repo, active_branch, last_indexed_file } = req.body;
+  const current = parcleDb.metadata["orchestrator:active_repo_context"];
+  
+  const updated = {
+    active_repo: active_repo !== undefined ? active_repo : current.active_repo,
+    active_branch: active_branch !== undefined ? active_branch : current.active_branch,
+    last_indexed_file: last_indexed_file !== undefined ? last_indexed_file : current.last_indexed_file
+  };
+  
+  parcleDb.metadata["orchestrator:active_repo_context"] = updated;
+  await saveParcle();
+  
+  res.json({
+    status: "success",
+    context: {
+      ...updated,
+      owner: getGitOwner()
+    }
   });
 });
 

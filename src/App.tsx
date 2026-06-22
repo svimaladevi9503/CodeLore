@@ -654,6 +654,17 @@ export default function Sandbox() {
     localStorage.setItem("theme", uiState.theme);
   }, [uiState.theme]);
 
+  // Sync selected repo name to Orchestrator context API
+  useEffect(() => {
+    if (docHelperState.repoName) {
+      fetch("/api/orchestrate/context", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active_repo: docHelperState.repoName })
+      }).catch((err) => console.error("Failed to sync active repo name:", err));
+    }
+  }, [docHelperState.repoName]);
+
   // Sync typewriter stream for Doc Helper
   useEffect(() => {
     if (docHelperState.pendingWebhook?.newReadme) {

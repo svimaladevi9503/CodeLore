@@ -34,40 +34,74 @@ export default function KnowledgeBaseView({
   parcleData,
   repoName
 }: KnowledgeBaseViewProps) {
-  const [selectedFile, setSelectedFile] = React.useState<string | null>(null);
+  const [repoContext, setRepoContext] = React.useState<{
+    active_repo: string;
+    active_branch: string;
+    last_indexed_file: string;
+    owner: string;
+  } | null>(null);
+  const [isSyncing, setIsSyncing] = React.useState(true);
 
-  const mostRecentFile = React.useMemo(() => {
-    if (!parcleData?.v_store || parcleData.v_store.length === 0) return null;
-    return parcleData.v_store[parcleData.v_store.length - 1].filename;
-  }, [parcleData]);
+  const fetchRepoContext = async (isPoll = false) => {
+    if (!isPoll) setIsSyncing(true);
+    try {
+      const res = await fetch("/api/orchestrate/context");
+      const data = await res.json();
+      if (data.status === "success" && data.context) {
+        setRepoContext(data.context);
+      }
+    } catch (err) {
+      console.error("Failed to fetch repo context:", err);
+    } finally {
+      if (!isPoll) setIsSyncing(false);
+    }
+  };
 
-  const activeFile = selectedFile || mostRecentFile;
+  React.useEffect(() => {
+    fetchRepoContext(false);
+    const interval = setInterval(() => fetchRepoContext(true), 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const isPillLoading = isSyncing && !repoContext;
 
   const { displayText, linkUrl } = React.useMemo(() => {
-    const baseRepoUrl = `https://github.com/svimaladevi9503/${repoName}`;
-    if (!activeFile) {
+    if (isPillLoading) {
       return {
-        displayText: `${repoName}/ —`,
+        displayText: "syncing...",
+        linkUrl: "#"
+      };
+    }
+    
+    const repo = repoContext?.active_repo || repoName;
+    const branch = repoContext?.active_branch || "main";
+    const file = repoContext?.last_indexed_file;
+    const owner = repoContext?.owner || "svimaladevi9503";
+    const baseRepoUrl = `https://github.com/${owner}/${repo}`;
+    
+    if (!file) {
+      return {
+        displayText: `${repo}/ —`,
         linkUrl: baseRepoUrl
       };
     }
     
-    const normalizedPath = activeFile.replace(/\\/g, "/");
+    const normalizedPath = file.replace(/\\/g, "/");
     const parts = normalizedPath.split("/");
     const fileName = parts.pop() || "";
     const folderName = parts.join("/");
     
     const formattedPath = folderName 
-      ? `${repoName}/${folderName}/${fileName}`
-      : `${repoName}/${fileName}`;
+      ? `${repo}/${folderName}/${fileName}`
+      : `${repo}/${fileName}`;
       
-    const fileLink = `${baseRepoUrl}/blob/main/${normalizedPath}`;
+    const fileLink = `${baseRepoUrl}/blob/${branch}/${normalizedPath}`;
     
     return {
       displayText: formattedPath,
       linkUrl: fileLink
     };
-  }, [activeFile, repoName]);
+  }, [repoContext, repoName, isPillLoading]);
   const chatItems = React.useMemo(() => {
     return chatLog.map((msg, idx) => ({
       id: `chat-msg-${idx}-${msg.sender}-${msg.timestamp}`,
@@ -100,12 +134,14 @@ export default function KnowledgeBaseView({
       <div className="shrink-0 flex">
         <a
           href={linkUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={`inline-flex items-center gap-1.5 text-[11px] font-mono font-normal px-2.5 py-1 rounded border transition-colors duration-250 select-none cursor-pointer ${
-            theme === "dark"
-              ? "text-slate-400 bg-slate-900 border-slate-800 hover:text-white hover:border-slate-700"
-              : "text-[#024D33] bg-[#eef3f1] border-emerald-200 hover:bg-[#e4ece9] hover:text-[#013524]"
+          target={isPillLoading ? undefined : "_blank"}
+          rel={isPillLoading ? undefined : "noopener noreferrer"}
+          className={`inline-flex items-center gap-1.5 text-[11px] font-mono font-normal px-2.5 py-1 rounded border transition-colors duration-250 select-none ${
+            isPillLoading 
+              ? "opacity-50 animate-pulse cursor-not-allowed pointer-events-none text-slate-500 bg-slate-900/50 border-slate-800"
+              : theme === "dark"
+                ? "text-slate-400 bg-slate-900 border-slate-800 hover:text-white hover:border-slate-700 cursor-pointer"
+                : "text-[#024D33] bg-[#eef3f1] border-emerald-200 hover:bg-[#e4ece9] hover:text-[#013524] cursor-pointer"
           }`}
         >
           <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" className="shrink-0">
@@ -159,9 +195,21 @@ export default function KnowledgeBaseView({
                           <button
                             type="button"
                             key={`citation-${src.filename}-${src.section}`}
-                            onClick={() => {
+                            onClick={async () => {
                               setActiveCitationText(citationText);
-                              setSelectedFile(src.filename);
+                              try {
+                                const res = await fetch("/api/orchestrate/context", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ last_indexed_file: src.filename })
+                                });
+                                const data = await res.json();
+                                if (data.status === "success" && data.context) {
+                                  setRepoContext(data.context);
+                                }
+                              } catch (err) {
+                                console.error("Failed to sync clicked file citation to backend:", err);
+                              }
                             }}
                             className="text-[10px] bg-slate-950 border border-slate-850 px-2 py-0.5 rounded text-blue-400 font-mono hover:border-blue-500/40 hover:text-blue-300 cursor-pointer inline-flex items-center gap-1 active:scale-95 transition"
                           >
