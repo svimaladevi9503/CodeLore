@@ -24,6 +24,7 @@ export interface ParcleRecord {
   qa_logs: Array<{ query: string; answer: string; timestamp: string; sources: Array<{ filename: string; section: string; relevance: string }> }>;
   clean_patches: Record<string, { file: string; patch: string; timestamp: string; applied: boolean }>;
   pipeline_runs: Array<{ id: string; name: string; status: string; timestamp: string; log: string }>;
+  metadata?: Record<string, any>;
 }
 
 export interface ScanIssue {

@@ -86,6 +86,7 @@ interface KbState {
   newChunkContent: string;
   chunkAddSuccess: boolean;
   activeCitationText: string | null;
+  firstTokenReceived?: boolean;
 }
 type KbAction =
   | { type: "SET_QUERY"; value: string }
@@ -95,7 +96,10 @@ type KbAction =
   | { type: "SET_NEW_SECTION"; value: string }
   | { type: "SET_NEW_CONTENT"; value: string }
   | { type: "SET_ADD_SUCCESS"; value: boolean }
-  | { type: "SET_CITATION"; value: string | null };
+  | { type: "SET_CITATION"; value: string | null }
+  | { type: "ADD_OR_UPDATE_STREAMING_MSG"; value: any }
+  | { type: "UPDATE_STREAMING_MSG"; id: string; value: any }
+  | { type: "SET_FIRST_TOKEN_RECEIVED"; value: boolean };
 
 const kbReducer = (state: KbState, action: KbAction): KbState => {
   switch (action.type) {
@@ -107,6 +111,27 @@ const kbReducer = (state: KbState, action: KbAction): KbState => {
     case "SET_NEW_CONTENT": return { ...state, newChunkContent: action.value };
     case "SET_ADD_SUCCESS": return { ...state, chunkAddSuccess: action.value };
     case "SET_CITATION": return { ...state, activeCitationText: action.value };
+    case "SET_FIRST_TOKEN_RECEIVED": return { ...state, firstTokenReceived: action.value };
+    case "ADD_OR_UPDATE_STREAMING_MSG": {
+      const exists = state.chatLog.some(msg => (msg as any).id === action.value.id);
+      if (exists) {
+        return {
+          ...state,
+          chatLog: state.chatLog.map(msg => (msg as any).id === action.value.id ? { ...msg, ...action.value } : msg)
+        };
+      } else {
+        return {
+          ...state,
+          chatLog: [...state.chatLog, action.value]
+        };
+      }
+    }
+    case "UPDATE_STREAMING_MSG": {
+      return {
+        ...state,
+        chatLog: state.chatLog.map(msg => (msg as any).id === action.id ? { ...msg, ...action.value } : msg)
+      };
+    }
     default: return state;
   }
 };
@@ -596,7 +621,8 @@ index c92b8d1..db3d6a2 105655
     newChunkSection: "Authentication Headers",
     newChunkContent: "All requests to our microservice gate require signature matching inside headers.",
     chunkAddSuccess: false,
-    activeCitationText: null
+    activeCitationText: null,
+    firstTokenReceived: false
   });
 
   const [cleanerState, dispatchCleaner] = useReducer(cleanerReducer, {
@@ -830,36 +856,110 @@ export default function Sandbox() {
     }
   };
 
-  // Run KB Query (RAG)
+  // Run KB Query (RAG) with SSE streaming
   const queryKnowledgeBase = async () => {
     if (!kbState.userQuery.trim()) return;
     
     const userMsg = { sender: "user" as const, text: kbState.userQuery, timestamp: new Date().toLocaleTimeString() };
     dispatchKb({ type: "SET_LOG", value: (prev) => [...prev, userMsg] });
     dispatchKb({ type: "SET_LOADING", value: true });
+    dispatchKb({ type: "SET_FIRST_TOKEN_RECEIVED", value: false });
     const qTemp = kbState.userQuery;
     dispatchKb({ type: "SET_QUERY", value: "" });
 
     try {
-      const res = await fetch("/api/rag/query", {
+      const res = await fetch("/api/kb/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: qTemp })
       });
-      const data = await res.json();
-      
-      const agentMsg = {
-        sender: "agent" as const,
-        text: data.result.answer,
-        sources: data.result.sources,
-        timestamp: new Date().toLocaleTimeString()
-      };
-      dispatchKb({ type: "SET_LOG", value: (prev) => [...prev, agentMsg] });
+
+      if (!res.ok) {
+        throw new Error("HTTP error " + res.status);
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No reader available");
+
+      const decoder = new TextDecoder();
+      let done = false;
+      let activeText = "";
+      let sources: any[] = [];
+      let firstTokenReceived = false;
+
+      const agentMsgId = `agent-msg-${Date.now()}`;
+      dispatchKb({
+        type: "ADD_OR_UPDATE_STREAMING_MSG",
+        value: {
+          id: agentMsgId,
+          sender: "agent",
+          text: "",
+          sources: [],
+          timestamp: new Date().toLocaleTimeString()
+        }
+      });
+
+      let buffer = "";
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+        if (value) {
+          buffer += decoder.decode(value, { stream: !done });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              const dataStr = line.slice(6).trim();
+              if (dataStr === "[DONE]") {
+                done = true;
+                break;
+              }
+              try {
+                const parsed = JSON.parse(dataStr);
+                if (parsed.error === "no_results") {
+                  activeText = parsed.message;
+                  dispatchKb({
+                    type: "UPDATE_STREAMING_MSG",
+                    id: agentMsgId,
+                    value: { text: activeText, sources: [] }
+                  });
+                  break;
+                }
+                if (parsed.sources) {
+                  sources = parsed.sources;
+                  dispatchKb({
+                    type: "UPDATE_STREAMING_MSG",
+                    id: agentMsgId,
+                    value: { sources }
+                  });
+                }
+                if (parsed.token) {
+                  if (!firstTokenReceived) {
+                    firstTokenReceived = true;
+                    dispatchKb({ type: "SET_FIRST_TOKEN_RECEIVED", value: true });
+                  }
+                  activeText += parsed.token;
+                  dispatchKb({
+                    type: "UPDATE_STREAMING_MSG",
+                    id: agentMsgId,
+                    value: { text: activeText }
+                  });
+                }
+              } catch (e) {
+                console.error("Error parsing stream line", e);
+              }
+            }
+          }
+        }
+      }
       fetchDiagnostics();
+
     } catch (err) {
       console.error("KB query error:", err);
     } finally {
       dispatchKb({ type: "SET_LOADING", value: false });
+      dispatchKb({ type: "SET_FIRST_TOKEN_RECEIVED", value: false });
     }
   };
 
@@ -978,7 +1078,8 @@ export default function Sandbox() {
     addNewKnowledgeChunk,
     triggerCleanerScan,
     applyCleanerPatch,
-    runPipelineCheck
+    runPipelineCheck,
+    fetchDiagnostics
   };
 }
 
@@ -1001,7 +1102,8 @@ export default function App() {
     queryKnowledgeBase,
     addNewKnowledgeChunk,
     triggerCleanerScan,
-    applyCleanerPatch
+    applyCleanerPatch,
+    fetchDiagnostics
   } = useAppLogic();
 
   return (
@@ -1105,12 +1207,14 @@ export default function App() {
                     setUserQuery={(val) => dispatchKb({ type: "SET_QUERY", value: val })}
                     chatLog={kbState.chatLog}
                     chatLoading={kbState.chatLoading}
+                    firstTokenReceived={kbState.firstTokenReceived}
                     queryKnowledgeBase={queryKnowledgeBase}
                     activeCitationText={kbState.activeCitationText}
                     setActiveCitationText={(val) => dispatchKb({ type: "SET_CITATION", value: val })}
                     theme={uiState.theme}
                     parcleData={uiState.parcleData}
                     repoName="custom-docs"
+                    fetchDiagnostics={fetchDiagnostics}
                   />
                 </m.div>
               )}

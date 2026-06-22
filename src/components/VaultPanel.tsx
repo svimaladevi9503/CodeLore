@@ -29,15 +29,43 @@ export default function VaultPanel({
     return "bg-emerald-500 animate-pulse-dot";
   };
 
+  const allChunks = React.useMemo(() => {
+    if (!parcleData) return [];
+    const list: Array<{ filename: string; section: string }> = [...parcleData.v_store];
+    if (parcleData.metadata) {
+      for (const [key, val] of Object.entries(parcleData.metadata)) {
+        if (key.startsWith("kb:") && key !== "kb:index:manifest" && !key.endsWith(":prev")) {
+          const chunk = val as any;
+          if (chunk && chunk.filename) {
+            list.push({
+              filename: chunk.filename,
+              section: chunk.header || "Section"
+            });
+          }
+        }
+      }
+    }
+    return list;
+  }, [parcleData]);
+
   const getKnowledgeIndexHealth = () => {
     if (!parcleData) return { label: "Empty index", style: "w-0 bg-rose-500" };
-    const size = parcleData.v_store.length;
+    const size = allChunks.length;
     if (size > 10) return { label: "Fresh matrix", style: "w-full bg-emerald-500" };
     if (size > 0) return { label: "Fresh snapshot", style: "w-2/3 bg-blue-500" };
     return { label: "Empty index", style: "w-1/4 bg-amber-500" };
   };
 
   const indexHealth = getKnowledgeIndexHealth();
+
+  const pendingSyncCount = React.useMemo(() => {
+    try {
+      const syncList = JSON.parse(localStorage.getItem("kb_pending_sync") || "[]");
+      return syncList.length;
+    } catch (e) {
+      return 0;
+    }
+  }, [parcleData]);
 
   return (
     <div className="flex flex-col gap-6 h-full font-sans">
@@ -113,9 +141,16 @@ export default function VaultPanel({
             </div>
 
             <div className="bg-slate-950/20 border border-slate-900 p-2.5 rounded-lg flex flex-col gap-2">
+              {pendingSyncCount > 0 && (
+                <div className="text-[10px] font-mono text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded flex items-center gap-1.5 animate-pulse select-none">
+                  <ServerCrash className="h-3 w-3" />
+                  <span>{pendingSyncCount} file pending sync</span>
+                </div>
+              )}
+
               <div className="flex items-center justify-between text-[11px] font-mono select-none">
                 <span className="text-slate-500">Stored chunks:</span>
-                <span className="text-slate-300 font-medium">{parcleData.v_store.length} memory arrays</span>
+                <span className="text-slate-300 font-medium">{allChunks.length} memory arrays</span>
               </div>
 
               {/* Index health micro bar indicator */}
@@ -129,14 +164,14 @@ export default function VaultPanel({
                 </div>
               </div>
 
-              {parcleData.v_store.length === 0 ? (
+              {allChunks.length === 0 ? (
                 <div className="text-[11px] text-slate-650 font-mono py-2 text-center">No catalog indexed.</div>
               ) : (
                 <div className="space-y-1.5 border-t border-slate-900 pt-2.5 mt-1">
-                  {parcleData.v_store.slice(-5).map((ch) => (
+                  {allChunks.slice(-5).map((ch, chIdx) => (
                     <button
                       type="button"
-                      key={`vault-chunk-${ch.filename}-${ch.section}`}
+                      key={`vault-chunk-${ch.filename}-${ch.section}-${chIdx}`}
                       onClick={() => {
                         setActiveTab("kb");
                       }}

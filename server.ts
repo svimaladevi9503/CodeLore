@@ -1092,6 +1092,389 @@ app.post("/api/rag/query", async (req, res) => {
   }
 });
 
+// Cosine similarity helper
+function cosineSimilarity(vecA: number[], vecB: number[]): number {
+  if (!vecA.length || !vecB.length || vecA.length !== vecB.length) return 0;
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
+  }
+  if (normA === 0 || normB === 0) return 0;
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+// GitHub -> Parcle Ingestion Endpoint
+app.post("/api/kb/ingest", async (req, res) => {
+  const { path: filePath, github_token } = req.body;
+  if (!filePath) {
+    return res.status(400).json({ error: "Missing file path" });
+  }
+
+  if (!parcleDb.metadata) {
+    parcleDb.metadata = {};
+  }
+  const context = parcleDb.metadata["orchestrator:active_repo_context"] || {
+    active_repo: "custom-docs",
+    active_branch: "main",
+    last_indexed_file: "README.md"
+  };
+  const owner = getGitOwner();
+  const repo = context.active_repo;
+  const branch = context.active_branch || "main";
+
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${branch}`;
+  
+  try {
+    const headers: Record<string, string> = {
+      "User-Agent": "CodeLore-App",
+      "Accept": "application/vnd.github.v3+json"
+    };
+    if (github_token) {
+      headers["Authorization"] = `token ${github_token}`;
+    } else if (process.env.GITHUB_TOKEN) {
+      headers["Authorization"] = `token ${process.env.GITHUB_TOKEN}`;
+    }
+
+    const ghRes = await fetch(url, { headers });
+    if (!ghRes.ok) {
+      const errorText = await ghRes.text();
+      return res.status(ghRes.status).json({ error: `GitHub fetch failed: ${ghRes.statusText}. Details: ${errorText}` });
+    }
+
+    const data = await ghRes.json();
+    if (data.type !== "file" || !data.content) {
+      return res.status(400).json({ error: "Target path is not a file or has no content" });
+    }
+
+    const rawContent = Buffer.from(data.content, data.encoding || 'base64').toString('utf8');
+
+    // Parse file content: split by H2/H3 headers
+    const lines = rawContent.split(/\r?\n/);
+    let currentHeader = "Introduction";
+    let currentBodyLines: string[] = [];
+    const rawChunks: Array<{ header: string; body: string }> = [];
+
+    const finalizeChunk = () => {
+      const body = currentBodyLines.join("\n").trim();
+      if (body) {
+        rawChunks.push({ header: currentHeader, body });
+      }
+      currentBodyLines = [];
+    };
+
+    for (const line of lines) {
+      const headerMatch = line.match(/^(###?)\s+(.+)$/);
+      if (headerMatch) {
+        finalizeChunk();
+        currentHeader = headerMatch[2].trim();
+      } else {
+        currentBodyLines.push(line);
+      }
+    }
+    finalizeChunk();
+
+    // Chunk body to max 400 tokens (approximated by words)
+    const finalChunks: Array<{ filename: string; header: string; body: string; source_url: string; timestamp: string; branch: string }> = [];
+    const source_url = `https://github.com/${owner}/${repo}/blob/${branch}/${filePath}`;
+    const timestamp = new Date().toISOString();
+
+    for (const chunk of rawChunks) {
+      const words = chunk.body.split(/\s+/).filter(Boolean);
+      if (words.length > 400) {
+        const paragraphs = chunk.body.split(/\n\n+/);
+        let tempParagraphs: string[] = [];
+        let tempWordsCount = 0;
+        let subIndex = 1;
+
+        for (const para of paragraphs) {
+          const paraWords = para.split(/\s+/).filter(Boolean).length;
+          if (tempWordsCount + paraWords > 400) {
+            if (tempParagraphs.length > 0) {
+              finalChunks.push({
+                filename: filePath,
+                header: chunk.header + ` (Part ${subIndex})`,
+                body: tempParagraphs.join("\n\n"),
+                source_url,
+                timestamp,
+                branch
+              });
+              subIndex++;
+            }
+            tempParagraphs = [para];
+            tempWordsCount = paraWords;
+          } else {
+            tempParagraphs.push(para);
+            tempWordsCount += paraWords;
+          }
+        }
+        if (tempParagraphs.length > 0) {
+          finalChunks.push({
+            filename: filePath,
+            header: chunk.header + (subIndex > 1 ? ` (Part ${subIndex})` : ""),
+            body: tempParagraphs.join("\n\n"),
+            source_url,
+            timestamp,
+            branch
+          });
+        }
+      } else {
+        finalChunks.push({
+          filename: filePath,
+          header: chunk.header,
+          body: chunk.body,
+          source_url,
+          timestamp,
+          branch
+        });
+      }
+    }
+
+    // Slugify helper
+    const slugify = (text: string) => {
+      return text
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)/g, "");
+    };
+
+    // Embed and store
+    for (const chunk of finalChunks) {
+      const headerSlug = slugify(chunk.header);
+      const key = `kb:${repo}:${filePath}:${headerSlug}`;
+      const embedding = await generateEmbeddingVec(`${chunk.header}\n${chunk.body}`);
+      
+      const newValue = {
+        text: chunk.body,
+        header: chunk.header,
+        filename: chunk.filename,
+        embedding,
+        source_url: chunk.source_url,
+        indexed_at: timestamp
+      };
+
+      if (parcleDb.metadata[key]) {
+        parcleDb.metadata[`${key}:prev`] = parcleDb.metadata[key];
+      }
+      parcleDb.metadata[key] = newValue;
+    }
+
+    // Append manifest
+    const manifestKey = "kb:index:manifest";
+    let manifest = parcleDb.metadata[manifestKey] || [];
+    if (!Array.isArray(manifest)) {
+      manifest = [];
+    }
+    manifest = manifest.filter((entry: any) => entry.filename !== filePath);
+    manifest.push({
+      filename: filePath,
+      chunk_count: finalChunks.length,
+      indexed_at: timestamp
+    });
+    parcleDb.metadata[manifestKey] = manifest;
+
+    context.last_indexed_file = filePath;
+    parcleDb.metadata["orchestrator:active_repo_context"] = context;
+
+    await saveParcle();
+
+    return res.json({
+      status: "success",
+      filename: filePath,
+      chunk_count: finalChunks.length,
+      indexed_at: timestamp
+    });
+
+  } catch (err: any) {
+    console.error("Ingestion endpoint failed", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Streaming Q&A retrieval (Parcle -> Answer)
+app.post("/api/kb/query", async (req, res) => {
+  const { query } = req.body;
+  if (!query) {
+    return res.status(400).json({ error: "Missing query" });
+  }
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
+  try {
+    let queryEmbedding: number[] = [];
+    try {
+      queryEmbedding = await generateEmbeddingVec(query);
+    } catch (e) {
+      console.error("Failed to generate query embedding", e);
+    }
+
+    const kbChunks: Array<{ key: string; text: string; header: string; filename: string; embedding: number[]; source_url: string }> = [];
+    if (parcleDb.metadata) {
+      for (const [key, val] of Object.entries(parcleDb.metadata)) {
+        if (key.startsWith("kb:") && key !== "kb:index:manifest" && !key.endsWith(":prev")) {
+          const chunkVal = val as any;
+          if (chunkVal && chunkVal.text) {
+            kbChunks.push({
+              key,
+              text: chunkVal.text,
+              header: chunkVal.header || "",
+              filename: chunkVal.filename || "",
+              embedding: chunkVal.embedding || [],
+              source_url: chunkVal.source_url || ""
+            });
+          }
+        }
+      }
+    }
+
+    if (kbChunks.length === 0) {
+      let suggested = "README.md";
+      const manifest = parcleDb.metadata?.["kb:index:manifest"] || [];
+      if (Array.isArray(manifest) && manifest.length > 0) {
+        const queryLower = query.toLowerCase();
+        let bestScore = 0;
+        for (const entry of manifest) {
+          const fn = entry.filename.toLowerCase();
+          const overlap = computeTokenOverlap(queryLower, fn);
+          if (overlap > bestScore) {
+            bestScore = overlap;
+            suggested = entry.filename;
+          }
+        }
+      }
+      const emptyMsg = JSON.stringify({
+        error: "no_results",
+        message: `No matching knowledge found. Try adding ${suggested} to the knowledge base.`,
+        suggested_filename: suggested
+      });
+      res.write(`data: ${emptyMsg}\n\n`);
+      res.write(`data: [DONE]\n\n`);
+      res.end();
+      return;
+    }
+
+    const scoredChunks = kbChunks.map(chunk => {
+      let score = 0;
+      if (queryEmbedding.length > 0 && chunk.embedding && chunk.embedding.length > 0) {
+        score = cosineSimilarity(queryEmbedding, chunk.embedding);
+      } else {
+        score = computeTokenOverlap(query, `${chunk.header} ${chunk.text}`);
+      }
+      return { chunk, score };
+    });
+
+    scoredChunks.sort((a, b) => b.score - a.score);
+    const topChunks = scoredChunks.slice(0, 3).filter(x => x.score > 0.01);
+
+    if (topChunks.length === 0) {
+      let suggested = "README.md";
+      const manifest = parcleDb.metadata?.["kb:index:manifest"] || [];
+      if (Array.isArray(manifest) && manifest.length > 0) {
+        suggested = manifest[0].filename;
+      }
+      const emptyMsg = JSON.stringify({
+        error: "no_results",
+        message: `No matching knowledge found. Try adding ${suggested} to the knowledge base.`,
+        suggested_filename: suggested
+      });
+      res.write(`data: ${emptyMsg}\n\n`);
+      res.write(`data: [DONE]\n\n`);
+      res.end();
+      return;
+    }
+
+    const sources = topChunks.map(x => ({
+      filename: x.chunk.filename,
+      section: x.chunk.header,
+      source_url: x.chunk.source_url,
+      relevance: Number(x.score.toFixed(2))
+    }));
+    res.write(`data: ${JSON.stringify({ sources })}\n\n`);
+
+    let contextStr = "";
+    let tokenCount = 0;
+    for (const scored of topChunks) {
+      const chunkText = `[Source: ${scored.chunk.filename} › ${scored.chunk.header}]\n${scored.chunk.text}\n\n`;
+      const chunkTokens = chunkText.split(/\s+/).filter(Boolean).length;
+      if (tokenCount + chunkTokens <= 900) {
+        contextStr += chunkText;
+        tokenCount += chunkTokens;
+      } else {
+        break;
+      }
+    }
+
+    const ai = getAI();
+    if (!ai) {
+      const mockResponse = `Based on the provided chunk ${topChunks[0].chunk.filename}, here is the information: CodeLore uses Parcle memory systems to index workspace documentation. We can query these memories semantic RAG search easily.\n\nSource: ${topChunks[0].chunk.filename} › ${topChunks[0].chunk.header}`;
+      const words = mockResponse.split(" ");
+      for (const word of words) {
+        res.write(`data: ${JSON.stringify({ token: word + " " })}\n\n`);
+        await new Promise(resolve => setTimeout(resolve, 80));
+      }
+      res.write(`data: [DONE]\n\n`);
+      res.end();
+      return;
+    }
+
+    const systemPrompt = `You are CodeLore's knowledge assistant. Answer ONLY from the provided context chunks. Be concise — max 3 sentences unless the user asks for detail. Always end your answer with: Source: {filename} › {header}`;
+
+    const streamPromise = ai.models.generateContentStream({
+      model: "gemini-3.5-flash",
+      contents: `Context chunks:\n${contextStr}\n\nQuestion: ${query}`,
+      config: {
+        systemInstruction: systemPrompt
+      }
+    });
+
+    let completed = false;
+    const timeoutId = setTimeout(() => {
+      if (!completed) {
+        res.write(`data: ${JSON.stringify({ token: " [Answer truncated — ask for more detail]" })}\n\n`);
+        res.write(`data: [DONE]\n\n`);
+        res.end();
+        completed = true;
+      }
+    }, 5000);
+
+    try {
+      const responseStream = await streamPromise;
+      for await (const chunk of responseStream) {
+        if (completed) break;
+        const text = chunk.text;
+        if (text) {
+          res.write(`data: ${JSON.stringify({ token: text })}\n\n`);
+        }
+      }
+      if (!completed) {
+        clearTimeout(timeoutId);
+        res.write(`data: [DONE]\n\n`);
+        res.end();
+        completed = true;
+      }
+    } catch (streamErr: any) {
+      console.error("Stream failed", streamErr);
+      if (!completed) {
+        clearTimeout(timeoutId);
+        res.write(`data: ${JSON.stringify({ token: `\n[Stream Error: ${streamErr.message}]` })}\n\n`);
+        res.write(`data: [DONE]\n\n`);
+        res.end();
+      }
+    }
+
+  } catch (err: any) {
+    console.error("Query stream endpoint failed", err);
+    res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+    res.write(`data: [DONE]\n\n`);
+    res.end();
+  }
+});
+
 // Custom Vector chunk addition
 app.post("/api/rag/add-chunk", async (req, res) => {
   const { filename, section, content } = req.body;
