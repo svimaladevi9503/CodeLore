@@ -9,7 +9,7 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 RUN apk add --no-cache git python3 py3-pip python3-dev build-base cargo rust && \
     python3 -m venv .venv && \
-    .venv/bin/pip install --no-cache-dir readmeai && \
+    .venv/bin/pip install --no-cache-dir "readmeai[google-generativeai]" && \
     apk del python3-dev build-base cargo rust
 
 COPY package*.json ./
