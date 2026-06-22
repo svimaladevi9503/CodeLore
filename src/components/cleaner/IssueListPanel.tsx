@@ -85,7 +85,7 @@ export function IssueListPanel({
           <div className={`py-16 text-center flex flex-col items-center ${isDark ? "text-slate-500" : "text-slate-400"}`}>
             <Code2 className={`h-10 w-10 mx-auto mb-3 ${isDark ? "text-slate-700" : "text-slate-300"}`} />
             <p className="text-[13px] font-sans font-medium mb-3">No issues found yet</p>
-            <RunScanButton scanning={scanning} onRunScan={runScan} />
+            <RunScanButton scanning={scanning} disabled={scanning} onRunScan={runScan} />
           </div>
         ) : (
           filteredIssues.map((issue, idx) => (

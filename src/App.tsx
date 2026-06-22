@@ -1,5 +1,5 @@
 /* eslint-disable react-doctor/no-fetch-in-effect */
-import React, { useState, useEffect, useCallback, useReducer } from "react";
+import React, { useState, useEffect, useCallback, useReducer, useRef } from "react";
 import { 
   Database, Cpu, Search, CodeXml, Sun, Moon, GitBranch, X
 } from "lucide-react";
