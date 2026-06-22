@@ -412,6 +412,7 @@ async function saveParcle(): Promise<boolean> {
 (async () => {
   await initDb();
   await loadParcle();
+  await indexLocalRepository();
 })();
 
 // Lazy Gemini API initialization
@@ -464,6 +465,176 @@ function computeTokenOverlap(query: string, text: string): number {
     }
   }
   return matches / (Math.sqrt(qWords.size) * Math.sqrt(tWords.length || 1));
+}
+
+async function indexLocalRepository() {
+  console.log("Starting automatic repository indexing...");
+  try {
+    const owner = getGitOwner();
+    const context = parcleDb.metadata?.["orchestrator:active_repo_context"] || {
+      active_repo: "custom-docs",
+      active_branch: "main",
+      last_indexed_file: "README.md"
+    };
+    const repo = context.active_repo || "custom-docs";
+    const branch = context.active_branch || "main";
+
+    const filesToScan: string[] = ["README.md", "server.ts", "src/App.tsx", "src/types.ts"];
+    
+    // Scan src/components/
+    const componentsDir = path.join(process.cwd(), "src", "components");
+    if (fs.existsSync(componentsDir)) {
+      const files = fs.readdirSync(componentsDir);
+      for (const file of files) {
+        if (file.endsWith(".tsx") || file.endsWith(".ts")) {
+          filesToScan.push(`src/components/${file}`);
+        }
+      }
+    }
+
+    const timestamp = new Date().toISOString();
+
+    for (const filePath of filesToScan) {
+      const absPath = path.join(process.cwd(), filePath);
+      if (!fs.existsSync(absPath)) continue;
+
+      const rawContent = fs.readFileSync(absPath, "utf-8");
+      const lines = rawContent.split(/\r?\n/);
+      let currentHeader = "Overview";
+      let currentBodyLines: string[] = [];
+      const rawChunks: Array<{ header: string; body: string }> = [];
+
+      const finalizeChunk = () => {
+        const body = currentBodyLines.join("\n").trim();
+        if (body) {
+          rawChunks.push({ header: currentHeader, body });
+        }
+        currentBodyLines = [];
+      };
+
+      for (const line of lines) {
+        const headerMatch = line.match(/^(###?)\s+(.+)$/);
+        if (headerMatch) {
+          finalizeChunk();
+          currentHeader = headerMatch[2].trim();
+        } else {
+          currentBodyLines.push(line);
+        }
+      }
+      finalizeChunk();
+
+      const finalChunks: Array<{ filename: string; header: string; body: string; source_url: string; timestamp: string; branch: string }> = [];
+      const source_url = `https://github.com/${owner}/${repo}/blob/${branch}/${filePath}`;
+
+      for (const chunk of rawChunks) {
+        const words = chunk.body.split(/\s+/).filter(Boolean);
+        if (words.length > 400) {
+          const paragraphs = chunk.body.split(/\n\n+/);
+          let tempParagraphs: string[] = [];
+          let tempWordsCount = 0;
+          let subIndex = 1;
+
+          for (const para of paragraphs) {
+            const paraWords = para.split(/\s+/).filter(Boolean).length;
+            if (tempWordsCount + paraWords > 400) {
+              if (tempParagraphs.length > 0) {
+                finalChunks.push({
+                  filename: filePath,
+                  header: chunk.header + ` (Part ${subIndex})`,
+                  body: tempParagraphs.join("\n\n"),
+                  source_url,
+                  timestamp,
+                  branch
+                });
+                subIndex++;
+              }
+              tempParagraphs = [para];
+              tempWordsCount = paraWords;
+            } else {
+              tempParagraphs.push(para);
+              tempWordsCount += paraWords;
+            }
+          }
+          if (tempParagraphs.length > 0) {
+            finalChunks.push({
+              filename: filePath,
+              header: chunk.header + (subIndex > 1 ? ` (Part ${subIndex})` : ""),
+              body: tempParagraphs.join("\n\n"),
+              source_url,
+              timestamp,
+              branch
+            });
+          }
+        } else {
+          finalChunks.push({
+            filename: filePath,
+            header: chunk.header,
+            body: chunk.body,
+            source_url,
+            timestamp,
+            branch
+          });
+        }
+      }
+
+      const slugify = (text: string) => {
+        return text
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/(^-|-$)/g, "");
+      };
+
+      for (const chunk of finalChunks) {
+        const headerSlug = slugify(chunk.header);
+        const key = `kb:${repo}:${filePath}:${headerSlug}`;
+        const embedding = await generateEmbeddingVec(`${chunk.header}\n${chunk.body}`);
+        
+        const newValue = {
+          text: chunk.body,
+          header: chunk.header,
+          filename: chunk.filename,
+          embedding,
+          source_url: chunk.source_url,
+          indexed_at: timestamp
+        };
+
+        if (parcleDb.metadata[key]) {
+          parcleDb.metadata[`${key}:prev`] = parcleDb.metadata[key];
+        }
+        parcleDb.metadata[key] = newValue;
+      }
+
+      // Update manifest
+      const manifestKey = "kb:index:manifest";
+      const manifestData = parcleDb.metadata[manifestKey];
+      let manifest: any[] = [];
+      if (Array.isArray(manifestData)) {
+        manifest = manifestData;
+      } else if (manifestData && typeof manifestData === "object" && Array.isArray(manifestData.files)) {
+        manifest = manifestData.files;
+      }
+      
+      manifest = manifest.filter((entry: any) => entry.filename !== filePath);
+      manifest.push({
+        filename: filePath,
+        chunk_count: finalChunks.length,
+        indexed_at: timestamp
+      });
+      
+      const totalChunks = manifest.reduce((acc: number, entry: any) => acc + (entry.chunk_count || 0), 0);
+      
+      parcleDb.metadata[manifestKey] = {
+        repo_name: repo,
+        chunk_count: totalChunks,
+        files: manifest
+      };
+    }
+
+    await saveParcle();
+    console.log("Local repository indexed successfully.");
+  } catch (err) {
+    console.error("Local repository indexing failed:", err);
+  }
 }
 
 // -----------------------------------------------------------------------------
