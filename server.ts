@@ -1,7 +1,6 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
@@ -16,9 +15,6 @@ const pool = new Pool({
     rejectUnauthorized: false
   }
 });
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const IMPORT_REGEX_CACHE = new Map<string, RegExp>();
 const getImportRegex = (name: string): RegExp => {
