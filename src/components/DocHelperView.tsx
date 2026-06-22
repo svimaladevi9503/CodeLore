@@ -1,303 +1,672 @@
-import React from "react";
-import { GitBranch, GitPullRequest, ChevronRight, Sparkles, Check, CheckCircle, RefreshCw } from "lucide-react";
-import { WebhookResult } from "../types";
+import React, { useState, useEffect } from "react";
+import { 
+  GitBranch, 
+  ChevronRight, 
+  Sparkles, 
+  Check, 
+  Trash2, 
+  RefreshCw, 
+  Loader2, 
+  Eye, 
+  MessageSquare, 
+  Send, 
+  GitPullRequest, 
+  Settings, 
+  AlertCircle,
+  FileText
+} from "lucide-react";
+import { m, AnimatePresence } from "motion/react";
 
 interface DocHelperViewProps {
-  commitAuthor: string;
-  setCommitAuthor: (val: string) => void;
+  theme: "light" | "dark";
   repoName: string;
   setRepoName: (val: string) => void;
-  commitMessage: string;
-  setCommitMessage: (val: string) => void;
-  testDiff: string;
-  setTestDiff: (val: string) => void;
-  triggerPushWebhook: () => void;
-  isPushing: boolean;
-  pendingWebhook: WebhookResult | null;
-  customDraftContent: string;
-  setCustomDraftContent: (val: string) => void;
-  approveReadmeRevision: () => void;
-  streamedText: string;
-  docHelperStage: "idle" | "writing" | "opening_pr" | "pr_opened";
-  setPendingWebhook: (val: WebhookResult | null) => void;
-}
-
-function GithubDiffLines({ diffText }: { diffText: string }) {
-  const diffLines = React.useMemo(() => {
-    return diffText.split("\n").map((line, idx) => ({
-      id: `diff-line-${idx}`,
-      line
-    }));
-  }, [diffText]);
-
-  return (
-    <>
-      {diffLines.map((item) => {
-        let lineStyle = "text-slate-400";
-        if (item.line.startsWith("+") && !item.line.startsWith("+++")) {
-          lineStyle = "bg-teal-500/10 text-teal-300 font-mono py-0.5 border-l-2 border-teal-500 pl-1";
-        } else if (item.line.startsWith("-") && !item.line.startsWith("---")) {
-          lineStyle = "bg-rose-500/10 text-rose-300 font-mono py-0.5 border-l-2 border-rose-500 pl-1";
-        } else if (item.line.startsWith("@@")) {
-          lineStyle = "text-indigo-400/80 font-mono text-[11px] bg-indigo-500/5 py-0.5";
-        } else if (item.line.startsWith("diff") || item.line.startsWith("index") || item.line.startsWith("---") || item.line.startsWith("+++")) {
-          lineStyle = "text-slate-500 font-mono font-medium";
-        }
-
-        return (
-          <div key={item.id} className={`whitespace-pre-wrap select-text text-[11px] ${lineStyle}`}>
-            {item.line}
-          </div>
-        );
-      })}
-    </>
-  );
+  fetchDiagnostics?: () => void;
 }
 
 export default function DocHelperView({
-  commitAuthor,
-  setCommitAuthor,
+  theme,
   repoName,
   setRepoName,
-  commitMessage,
-  setCommitMessage,
-  testDiff,
-  setTestDiff,
-  triggerPushWebhook,
-  isPushing,
-  pendingWebhook,
-  customDraftContent,
-  setCustomDraftContent,
-  approveReadmeRevision,
-  streamedText,
-  docHelperStage,
-  setPendingWebhook
+  fetchDiagnostics
 }: DocHelperViewProps) {
+  // GitHub integration context
+  const [token] = useState(() => localStorage.getItem("github_token") || "");
+  const [ghUser, setGhUser] = useState<{ login: string; avatar_url: string } | null>(null);
+  const [ghRepos, setGhRepos] = useState<Array<{ id: number; name: string; full_name: string }>>([]);
 
+  // Readme state
+  const [readmeExists, setReadmeExists] = useState<boolean | null>(null);
+  const [readmeContent, setReadmeContent] = useState("");
+  const [readmeSha, setReadmeSha] = useState("");
+  const [loadingReadme, setLoadingReadme] = useState(false);
+  const [readmeError, setReadmeError] = useState("");
 
+  // Readmeai configuration template settings
+  const [align, setAlign] = useState("center");
+  const [badgeStyle, setBadgeStyle] = useState("default");
+  const [headerStyle, setHeaderStyle] = useState("classic");
+  const [navigationStyle, setNavigationStyle] = useState("bullet");
+  const [emojis, setEmojis] = useState("default");
+
+  // Readme modification and refinement states
+  const [draftContent, setDraftContent] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [pushing, setPushing] = useState(false);
+  const [refining, setRefining] = useState(false);
+  const [commitMessage, setCommitMessage] = useState("chore: update README.md via CodeLore AI");
+  
+  // Chat console states
+  const [chatInput, setChatInput] = useState("");
+  const [chatLogs, setChatLogs] = useState<Array<{ sender: "user" | "gemini"; text: string }>>([
+    { sender: "gemini", text: "I can modify your draft README. Ask me to add sections, change instructions, or reformat text." }
+  ]);
+
+  // Load GitHub context
+  useEffect(() => {
+    if (!token) return;
+    const fetchUserData = async () => {
+      try {
+        const userRes = await fetch("https://api.github.com/user", {
+          headers: { Authorization: `token ${token}` }
+        });
+        if (!userRes.ok) return;
+        const userData = await userRes.json();
+        setGhUser({ login: userData.login, avatar_url: userData.avatar_url });
+
+        const reposRes = await fetch("https://api.github.com/user/repos?sort=updated&per_page=100", {
+          headers: { Authorization: `token ${token}` }
+        });
+        if (reposRes.ok) {
+          setGhRepos(await reposRes.json());
+        }
+      } catch (err) {
+        console.error("Failed to load GitHub context", err);
+      }
+    };
+    fetchUserData();
+  }, [token]);
+
+  // Fetch repository README content
+  const checkReadmeStatus = async () => {
+    if (!token || !repoName || !ghUser) {
+      setReadmeExists(null);
+      setReadmeContent("");
+      setReadmeSha("");
+      return;
+    }
+    setLoadingReadme(true);
+    setReadmeError("");
+    try {
+      const selected = ghRepos.find(r => r.name === repoName);
+      const fullName = selected ? selected.full_name : `${ghUser.login}/${repoName}`;
+      const res = await fetch(`/api/github/readme?token=${token}&repo=${fullName}`);
+      if (!res.ok) throw new Error("Failed to query repository README file");
+      const data = await res.json();
+      if (data.exists) {
+        setReadmeExists(true);
+        setReadmeContent(data.content);
+        setDraftContent(data.content);
+        setReadmeSha(data.sha);
+      } else {
+        setReadmeExists(false);
+        setReadmeContent("");
+        setDraftContent("");
+        setReadmeSha("");
+      }
+    } catch (err: any) {
+      setReadmeError(err.message || "Failed to parse repository README");
+      setReadmeExists(null);
+    } finally {
+      setLoadingReadme(false);
+    }
+  };
+
+  useEffect(() => {
+    if (token && repoName && ghUser) {
+      checkReadmeStatus();
+    }
+  }, [repoName, token, ghUser, ghRepos]);
+
+  // Delete README file
+  const handleDeleteReadme = async () => {
+    if (!token || !repoName || !ghUser || !readmeSha) return;
+    if (!confirm("Are you sure you want to delete this repository's README.md? This cannot be undone.")) return;
+    
+    setDeleting(true);
+    try {
+      const selected = ghRepos.find(r => r.name === repoName);
+      const fullName = selected ? selected.full_name : `${ghUser.login}/${repoName}`;
+      const res = await fetch("/api/github/delete-readme", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, repo: fullName, sha: readmeSha })
+      });
+      if (!res.ok) throw new Error("Failed to delete remote file");
+      setReadmeExists(false);
+      setReadmeContent("");
+      setDraftContent("");
+      setReadmeSha("");
+      if (fetchDiagnostics) fetchDiagnostics();
+    } catch (err: any) {
+      alert(err.message || "Deletion failed");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // Generate README using readmeai
+  const handleGenerateReadme = async () => {
+    if (!token || !repoName || !ghUser) return;
+    setGenerating(true);
+    try {
+      const selected = ghRepos.find(r => r.name === repoName);
+      const fullName = selected ? selected.full_name : `${ghUser.login}/${repoName}`;
+      
+      const res = await fetch("/api/readme/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token,
+          repo: fullName,
+          repoName,
+          align,
+          badgeStyle,
+          headerStyle,
+          navigationStyle,
+          emojis
+        })
+      });
+      if (!res.ok) throw new Error("Failed to run readme-ai generator");
+      const data = await res.json();
+      setDraftContent(data.content);
+      setChatLogs([
+        { sender: "gemini", text: "Successfully generated the template using readme-ai! Review the preview on the right. You can request specific text refinements or add custom sections here." }
+      ]);
+    } catch (err: any) {
+      alert(err.message || "Generation failed");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  // Modify Draft via Chat
+  const handleSendChat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim() || !draftContent || refining) return;
+
+    const userText = chatInput.trim();
+    setChatInput("");
+    setChatLogs(prev => [...prev, { sender: "user", text: userText }]);
+    setRefining(true);
+
+    try {
+      const res = await fetch("/api/readme/modify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: draftContent, instruction: userText })
+      });
+      if (!res.ok) throw new Error("Failed to refine text");
+      const data = await res.json();
+      setDraftContent(data.content);
+      setChatLogs(prev => [...prev, { sender: "gemini", text: "Refined draft successfully. Changes are applied to the preview." }]);
+    } catch (err: any) {
+      setChatLogs(prev => [...prev, { sender: "gemini", text: `Error modifying README: ${err.message || "Connection failed"}` }]);
+    } finally {
+      setRefining(false);
+    }
+  };
+
+  // Push README back to GitHub
+  const handlePushReadme = async () => {
+    if (!token || !repoName || !ghUser || !draftContent) return;
+    setPushing(true);
+    try {
+      const selected = ghRepos.find(r => r.name === repoName);
+      const fullName = selected ? selected.full_name : `${ghUser.login}/${repoName}`;
+      
+      const res = await fetch("/api/github/push-readme", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token,
+          repo: fullName,
+          content: draftContent,
+          sha: readmeExists ? readmeSha : undefined,
+          message: commitMessage
+        })
+      });
+      if (!res.ok) throw new Error("Commit push rejected by remote GitHub server");
+      const data = await res.json();
+      alert("Successfully pushed README.md to your repository!");
+      
+      // Update local state variables
+      setReadmeExists(true);
+      setReadmeContent(draftContent);
+      setReadmeSha(data.commit.sha);
+      
+      if (fetchDiagnostics) fetchDiagnostics();
+    } catch (err: any) {
+      alert(err.message || "Failed to commit changes");
+    } finally {
+      setPushing(false);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-6">
       {/* Breadcrumb row */}
-      <div className="text-[12px] font-mono text-slate-500 tracking-tight flex items-center gap-1">
+      <div className={`text-[12px] font-mono tracking-tight flex items-center gap-1 ${
+        theme === "dark" ? "text-slate-500" : "text-slate-400"
+      }`}>
         <span>codeLore</span>
         <ChevronRight className="h-3 w-3 opacity-60" />
-        <span className="text-slate-400">documentation helper</span>
+        <span className={theme === "dark" ? "text-slate-400" : "text-slate-650"}>documentation helper</span>
         <ChevronRight className="h-3 w-3 opacity-60" />
-        <span className="text-teal-400">rewriteIndex</span>
+        <span className="text-teal-400">AI Readme Generator</span>
       </div>
 
-      {/* Title block */}
-      <div>
-        <h3 className="text-[16px] font-sans font-medium text-white flex items-center gap-2">
-          <GitBranch className="h-4.5 w-4.5 text-teal-400" />
-          <span>Documentation helper webhook</span>
-        </h3>
-        <p className="text-[12px] text-slate-400 mt-1">
-          Automatically intercept repository pushes, analyze complete commit logs, rewrite relevant sections of structural Readme documentation, and open localized commits.
-        </p>
-      </div>
-
-      {/* Simulator parameters input card */}
-      <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-4 md:p-5 flex flex-col gap-4">
-        <h4 className="text-[14px] font-sans font-medium text-slate-300">
-          Simulate GitHub push event
-        </h4>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1">
-              <label htmlFor="author-input" className="text-[12px] font-sans font-normal text-slate-400">Author identity</label>
-              <input
-                id="author-input"
-                type="text"
-                value={commitAuthor}
-                onChange={(e) => setCommitAuthor(e.target.value)}
-                aria-label="Author identity"
-                className="bg-slate-900 border border-slate-800 rounded-lg text-[12px] font-sans p-2 text-slate-200 outline-none focus:border-teal-500 transition"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label htmlFor="repo-input" className="text-[12px] font-sans font-normal text-slate-400">Repository node</label>
-              <input
-                id="repo-input"
-                type="text"
-                value={repoName}
-                onChange={(e) => setRepoName(e.target.value)}
-                aria-label="Repository node"
-                className="bg-slate-900 border border-slate-800 rounded-lg text-[12px] font-sans p-2 text-slate-200 outline-none focus:border-teal-500 transition"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label htmlFor="commit-msg-input" className="text-[12px] font-sans font-normal text-slate-400">Commit status message</label>
-              <input
-                id="commit-msg-input"
-                type="text"
-                value={commitMessage}
-                onChange={(e) => setCommitMessage(e.target.value)}
-                aria-label="Commit status message"
-                className="bg-slate-900 border border-slate-800 rounded-lg text-[12px] font-sans p-2 text-slate-200 outline-none focus:border-teal-500 transition"
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label htmlFor="diff-input" className="text-[12px] font-sans font-normal text-slate-400">Simulate code modification diff</label>
-            <textarea
-              id="diff-input"
-              value={testDiff}
-              onChange={(e) => setTestDiff(e.target.value)}
-              aria-label="Simulate code modification diff"
-              rows={6}
-              className="bg-slate-900 border border-slate-800 rounded-lg font-mono text-[11px] p-2 text-slate-200 outline-none focus:border-teal-500 transition resize-none h-full min-h-[140px]"
-            />
-          </div>
-        </div>
-
-        <div className="flex justify-end pt-1">
-          <button
-            type="button"
-            onClick={triggerPushWebhook}
-            disabled={isPushing}
-            className="bg-teal-500 hover:bg-teal-400 text-black font-sans font-medium text-[12px] py-2 px-4 rounded-lg cursor-pointer flex items-center gap-1.5 disabled:opacity-50 active:scale-95 transition"
-          >
-            <GitPullRequest className="h-3.5 w-3.5" />
-            <span>{isPushing ? "Analyzing diff..." : "Trigger git push webhook"}</span>
-          </button>
+      {/* Intro section */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-900 pb-4">
+        <div>
+          <h3 className={`text-[16px] font-sans font-medium flex items-center gap-2 ${
+            theme === "dark" ? "text-white" : "text-slate-800"
+          }`}>
+            <GitBranch className="h-4.5 w-4.5 text-teal-400" />
+            <span>AI Readme Generator</span>
+          </h3>
+          <p className={`text-[12px] mt-1 ${
+            theme === "dark" ? "text-slate-400" : "text-slate-600"
+          }`}>
+            Scan your codebase structures, select customization layouts, and generate premium interactive README files powered by Eli64s' Readme-AI engine.
+          </p>
         </div>
       </div>
 
-      {/* Side by side split view */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Left Side: Git Diff Monospace Highlights */}
-        <div className="flex flex-col gap-2 border border-slate-850 rounded-xl p-4 bg-slate-900/20">
-          <h4 className="text-[13px] font-sans font-medium text-slate-400 border-b border-slate-900 pb-2">
-            Incoming change diff block
-          </h4>
-          <div className="font-mono bg-slate-950 p-3 rounded-lg overflow-auto max-h-[300px] h-full min-h-[200px] leading-relaxed text-slate-350 select-text select-all">
-            <GithubDiffLines diffText={testDiff} />
-          </div>
+      {!token || !repoName ? (
+        <div className={`border border-dashed rounded-lg p-10 text-center text-[12px] font-sans font-normal ${
+          theme === "dark"
+            ? "border-slate-850 text-slate-500"
+            : "border-slate-200 text-slate-450 bg-slate-50/50"
+        }`}>
+          {!token 
+            ? "GitHub connection required. Please authorize on the general orchestrator view first." 
+            : "Select a repository context on the orchestrator view to begin documenting."}
         </div>
+      ) : (
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+          
+          {/* LEFT COLUMN: Setup Configurations & Existing README checker */}
+          <div className="xl:col-span-5 flex flex-col gap-6">
+            
+            {/* Status Panel for Existing README */}
+            <div className={`rounded-xl p-4 md:p-5 border flex flex-col gap-4 ${
+              theme === "dark" ? "bg-slate-950/40 border-slate-850" : "bg-white border-slate-200"
+            }`}>
+              <h4 className={`text-[13px] font-mono uppercase tracking-wider flex items-center gap-2 ${
+                theme === "dark" ? "text-slate-400" : "text-slate-500"
+              }`}>
+                <FileText className="h-4 w-4 text-teal-400" />
+                <span>Repository README Status</span>
+              </h4>
 
-        {/* Right Side: Readme preview (Character streaming representation) */}
-        <div className="flex flex-col gap-2 border border-slate-850 rounded-xl p-4 bg-slate-900/20">
-          <h4 className="text-[13px] font-sans font-medium text-slate-400 border-b border-slate-900 pb-2 flex items-center justify-between">
-            <span>Readme.md preview</span>
-            {docHelperStage === "writing" && (
-              <span className="flex items-center gap-1.5 text-[10px] text-teal-400 font-mono selection:bg-transparent">
-                <RefreshCw className="h-2.5 w-2.5 animate-spin" />
-                <span>streaming draft...</span>
-              </span>
-            )}
-          </h4>
+              {loadingReadme ? (
+                <div className="flex items-center gap-2 py-2">
+                  <Loader2 className="h-4 w-4 animate-spin text-teal-400" />
+                  <span className={`text-[11px] font-mono ${theme === "dark" ? "text-slate-550" : "text-slate-450"}`}>Scanning GitHub files...</span>
+                </div>
+              ) : readmeError ? (
+                <div className="text-[11px] font-mono text-red-400 flex items-center gap-1">
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  <span>{readmeError}</span>
+                </div>
+              ) : readmeExists === true ? (
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between bg-emerald-500/5 border border-emerald-500/20 p-3 rounded-lg">
+                    <span className="text-[12px] font-medium text-emerald-400 flex items-center gap-1.5">
+                      <Check className="h-4 w-4" />
+                      README.md exists on GitHub
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleDeleteReadme}
+                      disabled={deleting}
+                      className={`p-1.5 rounded transition flex items-center gap-1 text-[11px] font-mono cursor-pointer ${
+                        theme === "dark" ? "text-slate-500 hover:text-red-400 hover:bg-slate-900 border border-slate-850" : "text-slate-450 hover:text-red-650 hover:bg-slate-50 border border-slate-200"
+                      }`}
+                    >
+                      {deleting ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                      <span>Delete File</span>
+                    </button>
+                  </div>
+                  <p className={`text-[11px] leading-relaxed ${theme === "dark" ? "text-slate-500" : "text-slate-450"}`}>
+                    To update this README, configure the styles below and click "Regenerate". The tool will keep tracking this file's version key.
+                  </p>
+                </div>
+              ) : readmeExists === false ? (
+                <div className="bg-amber-500/5 border border-amber-500/20 p-3.5 rounded-lg flex flex-col gap-1">
+                  <span className="text-[12px] font-medium text-amber-400">README.md not discovered</span>
+                  <p className={`text-[11.5px] leading-relaxed mt-0.5 ${theme === "dark" ? "text-slate-400" : "text-slate-600"}`}>
+                    This repository lacks a root README.md. Use the configurations below to generate a new file.
+                  </p>
+                </div>
+              ) : null}
+            </div>
 
-          <div className="bg-slate-950 p-3.5 rounded-lg border border-slate-900 overflow-y-auto max-h-[300px] h-full min-h-[200px] prose prose-invert select-text leading-relaxed">
-            {docHelperStage === "idle" && streamedText.length === 0 ? (
-              <div className="text-[12px] font-sans font-normal text-slate-500 text-center py-10">
-                Waiting for a GitHub push. README will auto-update on next commit.
+            {/* Readme-AI Customization panel */}
+            <div className={`rounded-xl p-4 md:p-5 border flex flex-col gap-4 ${
+              theme === "dark" ? "bg-slate-950/40 border-slate-850" : "bg-white border-slate-200"
+            }`}>
+              <h4 className={`text-[13px] font-mono uppercase tracking-wider flex items-center gap-2 ${
+                theme === "dark" ? "text-slate-400" : "text-slate-500"
+              }`}>
+                <Settings className="h-4 w-4 text-teal-400 animate-pulse" />
+                <span>Readme-AI Settings</span>
+              </h4>
+
+              <div className="flex flex-col gap-4 font-sans">
+                
+                {/* Header Style Selector */}
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="header-style-select" className={`text-[11px] font-mono uppercase ${
+                    theme === "dark" ? "text-slate-400" : "text-slate-500"
+                  }`}>Header template style</label>
+                  <select
+                    id="header-style-select"
+                    value={headerStyle}
+                    onChange={(e) => setHeaderStyle(e.target.value)}
+                    className={`text-[12px] font-sans p-2 rounded-lg border outline-none cursor-pointer focus:border-teal-500 transition ${
+                      theme === "dark" ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
+                    }`}
+                  >
+                    <option value="classic">Classic (Default)</option>
+                    <option value="clean">Clean Minimalist</option>
+                    <option value="modern">Modern Visual</option>
+                    <option value="compact">Compact Overview</option>
+                    <option value="console">Terminal Console</option>
+                    <option value="ascii">Ascii Banner Header</option>
+                  </select>
+                </div>
+
+                {/* Badge Style Selector */}
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="badge-style-select" className={`text-[11px] font-mono uppercase ${
+                    theme === "dark" ? "text-slate-400" : "text-slate-500"
+                  }`}>Badge icon style type</label>
+                  <select
+                    id="badge-style-select"
+                    value={badgeStyle}
+                    onChange={(e) => setBadgeStyle(e.target.value)}
+                    className={`text-[12px] font-sans p-2 rounded-lg border outline-none cursor-pointer focus:border-teal-500 transition ${
+                      theme === "dark" ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
+                    }`}
+                  >
+                    <option value="default">Default Shield Badges</option>
+                    <option value="flat">Flat Square Badges</option>
+                    <option value="flat-square">Flat Square Minimal</option>
+                    <option value="for-the-badge">Big Banner Badges</option>
+                    <option value="plastic">3D Plastic Badges</option>
+                    <option value="skills">Technical Skill Badges</option>
+                    <option value="social">Social Interaction Style</option>
+                  </select>
+                </div>
+
+                {/* Emojis Theme Selector */}
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="emojis-select" className={`text-[11px] font-mono uppercase ${
+                    theme === "dark" ? "text-slate-400" : "text-slate-500"
+                  }`}>Emoji theme pack</label>
+                  <select
+                    id="emojis-select"
+                    value={emojis}
+                    onChange={(e) => setEmojis(e.target.value)}
+                    className={`text-[12px] font-sans p-2 rounded-lg border outline-none cursor-pointer focus:border-teal-500 transition ${
+                      theme === "dark" ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
+                    }`}
+                  >
+                    <option value="default">Default Developer Pack</option>
+                    <option value="minimal">Minimal / None</option>
+                    <option value="ascension">Ascension Glowing</option>
+                    <option value="harmony">Harmony Flow</option>
+                    <option value="monochrome">Monochrome Minimal</option>
+                    <option value="unicode">Standard Unicode Emojis</option>
+                    <option value="water">Nature / Water Elements</option>
+                    <option value="vintage">Classic Vintage Emojis</option>
+                    <option value="zen">Zen Meditative Emojis</option>
+                  </select>
+                </div>
+
+                {/* Text Alignment */}
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="align-select" className={`text-[11px] font-mono uppercase ${
+                    theme === "dark" ? "text-slate-400" : "text-slate-500"
+                  }`}>Header Text alignment</label>
+                  <select
+                    id="align-select"
+                    value={align}
+                    onChange={(e) => setAlign(e.target.value)}
+                    className={`text-[12px] font-sans p-2 rounded-lg border outline-none cursor-pointer focus:border-teal-500 transition ${
+                      theme === "dark" ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
+                    }`}
+                  >
+                    <option value="center">Centered</option>
+                    <option value="left">Left Aligned</option>
+                    <option value="right">Right Aligned</option>
+                  </select>
+                </div>
+
+                {/* Table of contents Navigation Style */}
+                <div className="flex flex-col gap-1.5 font-sans">
+                  <label htmlFor="nav-style-select" className={`text-[11px] font-mono uppercase ${
+                    theme === "dark" ? "text-slate-400" : "text-slate-500"
+                  }`}>Navigation index style</label>
+                  <select
+                    id="nav-style-select"
+                    value={navigationStyle}
+                    onChange={(e) => setNavigationStyle(e.target.value)}
+                    className={`text-[12px] font-sans p-2 rounded-lg border outline-none cursor-pointer focus:border-teal-500 transition ${
+                      theme === "dark" ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
+                    }`}
+                  >
+                    <option value="bullet">Standard Bullets</option>
+                    <option value="accordion">Accordion Toggle markup</option>
+                    <option value="number">Numeric index</option>
+                    <option value="roman">Roman Numerals</option>
+                  </select>
+                </div>
+
+                {/* Generate Button */}
+                <button
+                  type="button"
+                  onClick={handleGenerateReadme}
+                  disabled={generating}
+                  className={`mt-2 px-4 py-2.5 rounded-lg font-sans text-[12px] font-semibold cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 transition disabled:opacity-50 shadow-sm border ${
+                    theme === "dark"
+                      ? "bg-slate-900 border-teal-500/85 hover:bg-slate-850 text-teal-300"
+                      : "bg-white border-teal-550 hover:bg-teal-50/50 text-teal-700"
+                  }`}
+                >
+                  {generating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin text-teal-650" />
+                      <span>Analyzing structure & building README...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4 text-teal-650" />
+                      <span>{readmeExists ? "Regenerate README" : "Generate README"}</span>
+                    </>
+                  )}
+                </button>
+
+              </div>
+            </div>
+
+          </div>
+
+          {/* RIGHT COLUMN: Output Preview / Refinement Chat / Push Action */}
+          <div className="xl:col-span-7 flex flex-col gap-6">
+            
+            {draftContent ? (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                
+                {/* Preview Column (span 7) */}
+                <div className="lg:col-span-7 flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className={`text-[13px] font-mono uppercase tracking-wider flex items-center gap-1.5 ${
+                      theme === "dark" ? "text-slate-400" : "text-slate-500"
+                    }`}>
+                      <Eye className="h-4 w-4 text-teal-400" />
+                      <span>README Draft Preview</span>
+                    </h4>
+                  </div>
+
+                  <div className={`p-4 rounded-xl border prose prose-invert overflow-y-auto max-h-[460px] h-full min-h-[300px] select-text text-[12px] leading-relaxed ${
+                    theme === "dark"
+                      ? "bg-slate-950/20 border-slate-850 text-slate-300"
+                      : "bg-slate-50/40 border-slate-200 text-slate-800"
+                  }`}>
+                    <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-350 select-text">
+                      {draftContent}
+                    </pre>
+                  </div>
+                </div>
+
+                {/* Chat Column (span 5) */}
+                <div className="lg:col-span-5 flex flex-col gap-3">
+                  <h4 className={`text-[13px] font-mono uppercase tracking-wider flex items-center gap-1.5 ${
+                    theme === "dark" ? "text-slate-400" : "text-slate-500"
+                  }`}>
+                    <MessageSquare className="h-4 w-4 text-teal-400 animate-bounce" />
+                    <span>Gemini Refiner Chat</span>
+                  </h4>
+
+                  <div className={`border rounded-xl flex flex-col justify-between max-h-[460px] h-[460px] ${
+                    theme === "dark" ? "bg-slate-950/40 border-slate-850" : "bg-white border-slate-200"
+                  }`}>
+                    
+                    {/* Chat Logs */}
+                    <div className="flex-1 overflow-y-auto p-4 space-y-3 font-sans text-[12px]">
+                      {chatLogs.map((msg, i) => (
+                        <div key={i} className={`flex flex-col gap-1 max-w-[85%] ${
+                          msg.sender === "user" ? "ml-auto items-end" : "mr-auto items-start"
+                        }`}>
+                          <span className={`text-[10px] font-mono ${
+                            theme === "dark" ? "text-slate-500" : "text-slate-400"
+                          }`}>{msg.sender === "user" ? "You" : "Gemini"}</span>
+                          <div className={`p-2.5 rounded-lg leading-relaxed ${
+                            msg.sender === "user"
+                              ? theme === "dark"
+                                ? "bg-purple-500/10 text-purple-300 border border-purple-500/20"
+                                : "bg-purple-50 text-purple-700 border border-purple-100"
+                              : theme === "dark"
+                                ? "bg-slate-900 text-slate-200 border border-slate-800"
+                                : "bg-slate-50 text-slate-800 border border-slate-100"
+                          }`}>
+                            {msg.text}
+                          </div>
+                        </div>
+                      ))}
+                      {refining && (
+                        <div className="flex items-center gap-1.5 text-slate-500 font-mono text-[10px] py-1">
+                          <Loader2 className="h-3 w-3 animate-spin text-teal-500" />
+                          <span>Gemini is editing markdown...</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Chat Input */}
+                    <form onSubmit={handleSendChat} className={`p-3 border-t flex gap-2 ${
+                      theme === "dark" ? "border-slate-900 bg-slate-950/20" : "border-slate-150 bg-slate-50/50"
+                    }`}>
+                      <input
+                        type="text"
+                        placeholder="Request edits..."
+                        value={chatInput}
+                        onChange={e => setChatInput(e.target.value)}
+                        className={`flex-1 border rounded-lg text-[12px] font-sans px-2.5 py-1.5 outline-none focus:border-teal-500 transition ${
+                          theme === "dark" ? "bg-slate-900 border-slate-800 text-slate-200" : "bg-white border-slate-200 text-slate-800"
+                        }`}
+                      />
+                      <button
+                        type="submit"
+                        disabled={refining || !chatInput.trim()}
+                        className={`p-2 rounded-lg cursor-pointer flex items-center justify-center transition border active:scale-95 disabled:opacity-50 ${
+                          theme === "dark" ? "bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-850" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                        }`}
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                      </button>
+                    </form>
+                  </div>
+                </div>
+
+                {/* Commit & Push Controller (Full Row Span 12) */}
+                <div className={`lg:col-span-12 rounded-xl p-4.5 border flex flex-col md:flex-row items-center justify-between gap-4 mt-1 ${
+                  theme === "dark"
+                    ? "bg-slate-950/40 border-slate-850/80"
+                    : "bg-white border-slate-200"
+                }`}>
+                  <div className="flex items-start gap-2.5 min-w-0 flex-1 w-full md:w-auto">
+                    <GitPullRequest className="h-5 w-5 text-teal-400 shrink-0 mt-1" />
+                    <div className="flex-grow flex flex-col gap-1 w-full">
+                      <span className={`text-[12.5px] font-sans font-semibold leading-none ${
+                        theme === "dark" ? "text-white" : "text-slate-850"
+                      }`}>Commit push config</span>
+                      <input
+                        type="text"
+                        placeholder="Commit message..."
+                        value={commitMessage}
+                        onChange={e => setCommitMessage(e.target.value)}
+                        className={`text-[11.5px] font-sans w-full border rounded px-2.5 py-1.5 outline-none focus:border-teal-500 mt-1 transition ${
+                          theme === "dark" ? "bg-slate-900 border-slate-800 text-slate-300" : "bg-slate-50 border-slate-200 text-slate-700"
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handlePushReadme}
+                    disabled={pushing}
+                    className={`px-5 py-3.5 rounded-lg font-sans text-[12.5px] font-semibold cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 transition disabled:opacity-50 shadow-md w-full md:w-auto ${
+                      theme === "dark"
+                        ? "bg-white text-slate-950 border border-teal-500 hover:bg-slate-100"
+                        : "bg-teal-650 text-white border border-teal-650 hover:bg-teal-700 shadow-teal-500/10"
+                    }`}
+                  >
+                    {pushing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Pushing to GitHub remote...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="h-4 w-4" />
+                        <span>Push README to repository</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
               </div>
             ) : (
-              <div className="text-[12px] font-sans font-normal text-slate-300">
-                <span className="font-mono text-slate-400 block pb-2 mb-2 border-b border-slate-900/80 text-[11px]">
-                  # Codebase snapshot output markup
-                </span>
-                <span className="whitespace-pre-wrap">{streamedText || customDraftContent || "Synthesized draft content loading..."}</span>
-                <span className="inline-block w-1.5 h-3.5 bg-teal-400 ml-0.5 animate-pulse"></span>
+              <div className={`border border-dashed rounded-lg p-16 text-center text-[12px] font-sans font-normal ${
+                theme === "dark"
+                  ? "border-slate-850 text-slate-500"
+                  : "border-slate-200 text-slate-450 bg-slate-50/50"
+              }`}>
+                Customize settings and trigger README generation to review output preview.
               </div>
             )}
-          </div>
-        </div>
-      </div>
 
-      {/* Step Status Bar at Bottom */}
-      <div className="bg-slate-950 border border-slate-850 p-4 rounded-xl flex flex-wrap items-center justify-between gap-4">
-        <span className="text-[11px] font-mono text-slate-500 tracking-wider">PIPELINE MONITOR</span>
-        
-        <div className="flex flex-wrap items-center gap-4 text-[12px] font-mono select-none">
-          {/* Step 1: Diff received */}
-          <div className={`flex items-center gap-1.5 ${streamedText.length > 0 || docHelperStage !== "idle" ? "text-teal-400" : "text-slate-600"}`}>
-            <span className="h-1.5 w-1.5 rounded-full bg-current"></span>
-            <span>diff processed</span>
           </div>
 
-          <ChevronRight className="h-3.5 w-3.5 text-slate-700 hidden sm:block" />
-
-          {/* Step 2: Writing */}
-          <div className={`flex items-center gap-1.5 ${docHelperStage === "writing" ? "text-teal-400 animate-pulse" : streamedText.length > 0 ? "text-teal-400" : "text-slate-600"}`}>
-            <span className="h-1.5 w-1.5 rounded-full bg-current"></span>
-            <span>LLM rewriting</span>
-          </div>
-
-          <ChevronRight className="h-3.5 w-3.5 text-slate-700 hidden sm:block" />
-
-          {/* Step 3: Approved / PR ready */}
-          <div className={`flex items-center gap-1.5 ${(docHelperStage as string) === "opening_pr" ? "text-amber-400" : (docHelperStage as string) === "pr_opened" || (pendingWebhook && (docHelperStage as string) === "opening_pr") ? "text-teal-400" : "text-slate-600"}`}>
-            <span className="h-1.5 w-1.5 rounded-full bg-current"></span>
-            <span>PR candidate ready</span>
-          </div>
-
-          <ChevronRight className="h-3.5 w-3.5 text-slate-700 hidden sm:block" />
-
-          {/* Step 4: Parcle synchronized */}
-          <div className={`flex items-center gap-1.5 ${docHelperStage === "pr_opened" ? "text-emerald-400" : "text-slate-600"}`}>
-            <span className="h-1.5 w-1.5 rounded-full bg-current bg-emerald-500"></span>
-            <span>Parcle saved</span>
-          </div>
-        </div>
-
-        {/* PR Status transition pill: writing -> opening PR -> PR #42 opened */}
-        <div className="ml-auto font-mono text-[11px]">
-          {docHelperStage === "writing" && (
-            <span className="bg-teal-500/10 text-teal-400 border border-teal-500/20 px-2 py-1 rounded">
-              writing
-            </span>
-          )}
-          {docHelperStage === "opening_pr" && (
-            <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-1 rounded">
-              opening PR
-            </span>
-          )}
-          {docHelperStage === "pr_opened" && (
-            <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-1 rounded font-medium">
-              PR #42 opened
-            </span>
-          )}
-          {docHelperStage === "idle" && (
-            <span className="text-slate-500 font-mono">[ pipeline standby ]</span>
-          )}
-        </div>
-      </div>
-
-      {/* Inline Accept & Update representation */}
-      {pendingWebhook && docHelperStage === "opening_pr" && (
-        <div className="border border-emerald-500/30 bg-emerald-500/5 p-4 rounded-xl flex flex-col md:flex-row md:items-center md:justify-between gap-4 mt-2">
-          <div className="flex items-start gap-2">
-            <CheckCircle className="h-5 w-5 text-emerald-400 shrink-0 mt-0.5" />
-            <div>
-              <p className="text-[13px] font-sans font-medium text-white leading-none">Accept proposal draft</p>
-              <p className="text-[11px] text-slate-400 mt-1">Accept the generated README.md changes to dynamically build the PR and sync Parcle databases.</p>
-            </div>
-          </div>
-
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setPendingWebhook(null)}
-              className="text-[11px] font-mono text-slate-400 hover:text-white px-3 py-1 bg-slate-900 border border-slate-800 rounded hover:border-slate-700 cursor-pointer"
-            >
-              Reject
-            </button>
-            <button
-              type="button"
-              onClick={approveReadmeRevision}
-              className="bg-emerald-500 hover:bg-emerald-400 text-black font-sans font-medium text-[11px] px-3.5 py-1.5 rounded flex items-center gap-1 cursor-pointer transition active:scale-95"
-            >
-              <Check className="h-3.5 w-3.5" />
-              <span>Accept & update codebase docs</span>
-            </button>
-          </div>
         </div>
       )}
     </div>

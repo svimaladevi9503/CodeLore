@@ -1173,23 +1173,10 @@ export default function App() {
                   transition={{ duration: 0.15 }}
                 >
                   <DocHelperView
-                    commitAuthor={docHelperState.commitAuthor}
-                    setCommitAuthor={(val) => dispatchDocHelper({ type: "SET_AUTHOR", value: val })}
+                    theme={uiState.theme}
                     repoName={docHelperState.repoName}
                     setRepoName={(val) => dispatchDocHelper({ type: "SET_REPO", value: val })}
-                    commitMessage={docHelperState.commitMessage}
-                    setCommitMessage={(val) => dispatchDocHelper({ type: "SET_MESSAGE", value: val })}
-                    testDiff={docHelperState.testDiff}
-                    setTestDiff={(val) => dispatchDocHelper({ type: "SET_DIFF", value: val })}
-                    triggerPushWebhook={triggerPushWebhook}
-                    isPushing={docHelperState.isPushing}
-                    pendingWebhook={docHelperState.pendingWebhook}
-                    customDraftContent={docHelperState.customDraftContent}
-                    setCustomDraftContent={(val) => dispatchDocHelper({ type: "SET_DRAFT", value: val })}
-                    approveReadmeRevision={approveReadmeRevision}
-                    streamedText={docHelperState.streamedText}
-                    docHelperStage={docHelperState.stage}
-                    setPendingWebhook={(val) => dispatchDocHelper({ type: "SET_PENDING", value: val })}
+                    fetchDiagnostics={fetchDiagnostics}
                   />
                 </m.div>
               )}

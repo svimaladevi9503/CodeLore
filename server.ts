@@ -930,6 +930,189 @@ app.post("/api/approve-readme", async (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
+// OVERHAULED AI README GENERATOR ENDPOINTS
+// -----------------------------------------------------------------------------
+
+// Fetch README.md from remote GitHub repository
+app.get("/api/github/readme", async (req, res) => {
+  const { token, repo } = req.query;
+  if (!token || !repo) {
+    return res.status(400).json({ error: "Missing token or repo parameter" });
+  }
+  try {
+    const response = await fetch(`https://api.github.com/repos/${repo}/contents/README.md`, {
+      headers: {
+        Authorization: `token ${token}`,
+        "User-Agent": "CodeLore"
+      }
+    });
+    if (response.status === 404) {
+      return res.json({ exists: false });
+    }
+    if (!response.ok) {
+      throw new Error(`GitHub API returned status ${response.status}`);
+    }
+    const data: any = await response.json();
+    const decoded = Buffer.from(data.content, "base64").toString("utf-8");
+    res.json({ exists: true, content: decoded, sha: data.sha });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to fetch README" });
+  }
+});
+
+// Delete README.md from remote GitHub repository
+app.post("/api/github/delete-readme", async (req, res) => {
+  const { token, repo, sha, message = "chore: delete README.md" } = req.body;
+  if (!token || !repo || !sha) {
+    return res.status(400).json({ error: "Missing token, repo, or sha" });
+  }
+  try {
+    const response = await fetch(`https://api.github.com/repos/${repo}/contents/README.md`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `token ${token}`,
+        "User-Agent": "CodeLore",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ message, sha })
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`GitHub API returned status ${response.status}: ${errorText}`);
+    }
+    res.json({ status: "success" });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to delete README" });
+  }
+});
+
+// Run local readme-ai command on cloned remote repository code
+app.post("/api/readme/generate", async (req, res) => {
+  const { token, repo, repoName, align, badgeStyle, headerStyle, navigationStyle, emojis } = req.body;
+  if (!token || !repo) {
+    return res.status(400).json({ error: "Missing token or repo" });
+  }
+
+  const tempDir = path.join(process.cwd(), "tmp", `repo_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
+  
+  try {
+    fs.mkdirSync(tempDir, { recursive: true });
+    
+    // Clone repo depth 1
+    execSync(`git clone --depth 1 https://x-token-auth:${token}@github.com/${repo}.git ${tempDir}`, { stdio: "ignore" });
+    
+    // Write ignore file
+    fs.writeFileSync(path.join(tempDir, ".readmeaiignore"), `.git/\nnode_modules/\n.venv/\ndist/\nbuild/\n.env\n`, "utf-8");
+
+    const readmeaiPath = path.join(process.cwd(), ".venv", "bin", "readmeai");
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
+    
+    const cmd = `"${readmeaiPath}" --repository "${tempDir}" --output "${tempDir}/README_GEN.md" --api gemini --model gemini-1.5-flash --align ${align || "center"} --badge-style ${badgeStyle || "default"} --header-style ${headerStyle || "classic"} --navigation-style ${navigationStyle || "bullet"} --emojis ${emojis || "default"}`;
+
+    try {
+      if (!apiKey) throw new Error("No Gemini API key available");
+      execSync(cmd, { env: { ...process.env, GEMINI_API_KEY: apiKey, GOOGLE_API_KEY: apiKey } });
+    } catch (apiErr: any) {
+      console.warn("Generating readme-ai in offline fallback mode:", apiErr.message);
+      const offlineCmd = cmd.replace("--api gemini --model gemini-1.5-flash", "--api offline");
+      execSync(offlineCmd);
+    }
+
+    const genPath = path.join(tempDir, "README_GEN.md");
+    if (!fs.existsSync(genPath)) {
+      throw new Error("README generation failed to create output file");
+    }
+
+    const content = fs.readFileSync(genPath, "utf-8");
+    res.json({ status: "success", content });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to generate README" });
+  } finally {
+    try {
+      if (fs.existsSync(tempDir)) {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    } catch (e) {
+      console.error("Cleanup failed", e);
+    }
+  }
+});
+
+// Edit/refine generated README via Gemini LLM using instructions
+app.post("/api/readme/modify", async (req, res) => {
+  const { content, instruction } = req.body;
+  if (!content || !instruction) {
+    return res.status(400).json({ error: "Missing content or instruction" });
+  }
+  
+  const ai = getAI();
+  if (!ai) {
+    return res.status(500).json({ error: "Gemini AI client not initialized" });
+  }
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: `You are a professional documentation editor. Modify the following README markdown content based on the user's instructions.
+      
+Current README:
+${content}
+
+User Instructions:
+${instruction}
+
+Output only the updated complete README markdown content. Do not include any conversational preamble or markdown code blocks wraps outside of the markdown itself.`,
+      config: {
+        systemInstruction: "You edit markdown documents directly. You output only the edited document content with no conversational text."
+      }
+    });
+
+    res.json({ status: "success", content: response.text || content });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to refine README" });
+  }
+});
+
+// Push/write README.md to remote GitHub repository
+app.post("/api/github/push-readme", async (req, res) => {
+  const { token, repo, content, sha, message = "chore: update README.md" } = req.body;
+  if (!token || !repo || !content) {
+    return res.status(400).json({ error: "Missing token, repo, or content" });
+  }
+
+  try {
+    const base64Content = Buffer.from(content, "utf-8").toString("base64");
+    const body: any = {
+      message,
+      content: base64Content
+    };
+    if (sha) {
+      body.sha = sha;
+    }
+
+    const response = await fetch(`https://api.github.com/repos/${repo}/contents/README.md`, {
+      method: "PUT",
+      headers: {
+        Authorization: `token ${token}`,
+        "User-Agent": "CodeLore",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`GitHub API returned status ${response.status}: ${errorText}`);
+    }
+
+    const data: any = await response.json();
+    res.json({ status: "success", commit: data.commit });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to push README to GitHub" });
+  }
+});
+
+// -----------------------------------------------------------------------------
 // KNOWLEDGE BASE AGENT RAG LOGIC
 // -----------------------------------------------------------------------------
 
