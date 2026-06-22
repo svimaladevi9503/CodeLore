@@ -16,7 +16,6 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/server.cjs ./server.cjs
-COPY --from=builder /app/server.cjs.map ./server.cjs.map
 COPY --from=builder /app/README.md ./README.md
 COPY --from=builder /app/.git ./.git
 
