@@ -4,6 +4,7 @@ import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import Groq from "groq-sdk";
 import dotenv from "dotenv";
 import { Pool } from "pg";
 import { exec, execSync } from "child_process";
@@ -418,6 +419,9 @@ async function saveParcle(): Promise<boolean> {
 
 // Lazy Gemini API initialization
 let aiClient: any = null;
+let groqClient: Groq | null = null;
+const GROQ_MODEL = "llama-3.3-70b-versatile";
+
 function getAI() {
   if (!aiClient) {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -435,6 +439,68 @@ function getAI() {
     });
   }
   return aiClient;
+}
+
+function getGroq() {
+  if (!groqClient) {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+      console.warn("GROQ_API_KEY missing. Groq README flows unavailable.");
+      return null;
+    }
+    groqClient = new Groq({ apiKey });
+  }
+  return groqClient;
+}
+
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === "string") return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return "Unknown error";
+  }
+}
+
+function isGeminiQuotaError(err: unknown): boolean {
+  const message = getErrorMessage(err).toLowerCase();
+  return (
+    message.includes("\"code\":429") ||
+    message.includes("quota exceeded") ||
+    message.includes("resource_exhausted") ||
+    message.includes("too many requests") ||
+    message.includes("rate limit")
+  );
+}
+
+function getGeminiFriendlyError(err: unknown): string {
+  if (isGeminiQuotaError(err)) {
+    return "Gemini quota reached. Add billing, switch API key, or retry after quota reset.";
+  }
+  return getErrorMessage(err);
+}
+
+async function generateGroqText(params: {
+  system: string;
+  user: string;
+  temperature?: number;
+}): Promise<string> {
+  const groq = getGroq();
+  if (!groq) {
+    throw new Error("Groq AI client not initialized");
+  }
+
+  const response = await groq.chat.completions.create({
+    model: GROQ_MODEL,
+    temperature: params.temperature ?? 0.2,
+    messages: [
+      { role: "system", content: params.system },
+      { role: "user", content: params.user }
+    ]
+  });
+
+  return response.choices[0]?.message?.content?.trim() || "";
 }
 
 // Embedder Helper using the specific embedding model
@@ -466,6 +532,24 @@ function computeTokenOverlap(query: string, text: string): number {
     }
   }
   return matches / (Math.sqrt(qWords.size) * Math.sqrt(tWords.length || 1));
+}
+
+function buildKnowledgeBaseFallbackAnswer(
+  topChunks: Array<{ chunk: { filename: string; header: string; body?: string; text?: string } }>
+): string {
+  const best = topChunks[0];
+  if (!best) {
+    return "I don't have that in my knowledge base yet. Try adding README.md to get that answer.";
+  }
+
+  const rawText = best.chunk.body || best.chunk.text || "";
+  const snippet = rawText
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 420)
+    .trim();
+  const suffix = rawText.length > snippet.length ? "..." : "";
+  return `${snippet}${suffix}\n\n› Source: ${best.chunk.filename} ${best.chunk.header}`;
 }
 
 async function indexLocalRepository() {
@@ -1679,7 +1763,7 @@ function getRepositoryContext(dir: string): { fileTree: string; fileContents: st
   return { fileTree, fileContents };
 }
 
-// Run local readme-ai command on cloned remote repository code and post-process with Gemini
+// Run local readme-ai command on cloned remote repository code and post-process with Groq
 app.post("/api/readme/generate", async (req, res) => {
   const { token, repo, repoName, align, badgeStyle, headerStyle, navigationStyle, emojis } = req.body;
   if (!token || !repo) {
@@ -1698,18 +1782,8 @@ app.post("/api/readme/generate", async (req, res) => {
     fs.writeFileSync(path.join(tempDir, ".readmeaiignore"), `.git/\nnode_modules/\n.venv/\ndist/\nbuild/\n.env\n`, "utf-8");
 
     const readmeaiPath = path.join(process.cwd(), ".venv", "bin", "readmeai");
-    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
-    
-    const cmd = `"${readmeaiPath}" --repository "${tempDir}" --output "${tempDir}/README_GEN.md" --api gemini --model gemini-1.5-flash --align ${align || "center"} --badge-style ${badgeStyle || "default"} --header-style ${headerStyle || "classic"} --navigation-style ${navigationStyle || "bullet"} --emojis ${emojis || "default"}`;
-
-    try {
-      if (!apiKey) throw new Error("No Gemini API key available");
-      execSync(cmd, { env: { ...process.env, GEMINI_API_KEY: apiKey, GOOGLE_API_KEY: apiKey } });
-    } catch (apiErr: any) {
-      console.warn("Generating readme-ai in offline fallback mode:", apiErr.message);
-      const offlineCmd = cmd.replace("--api gemini --model gemini-1.5-flash", "--api offline");
-      execSync(offlineCmd);
-    }
+    const cmd = `"${readmeaiPath}" --repository "${tempDir}" --output "${tempDir}/README_GEN.md" --api offline --align ${align || "center"} --badge-style ${badgeStyle || "default"} --header-style ${headerStyle || "classic"} --navigation-style ${navigationStyle || "bullet"} --emojis ${emojis || "default"}`;
+    execSync(cmd);
 
     const genPath = path.join(tempDir, "README_GEN.md");
     if (!fs.existsSync(genPath)) {
@@ -1722,15 +1796,14 @@ app.post("/api/readme/generate", async (req, res) => {
     const logoBase64 = getCodeLoreLogo();
     generatedLogos.set(repo, logoBase64);
 
-    // Step 2: Post-process generated README using Gemini and repository files context
-    const ai = getAI();
+    // Step 2: Post-process generated README using Groq and repository files context
     let finalMarkdown = content;
-    if (ai) {
+    if (getGroq()) {
       try {
         const repoCtx = getRepositoryContext(tempDir);
-        const rewriteResponse = await ai.models.generateContent({
-          model: "gemini-2.0-flash",
-          contents: `You are an expert README generator. Re-write the following draft README file to make it perfect, professional, and fully completed.
+        const rewriteText = await generateGroqText({
+          system: "You edit and improve README.md files to make them complete, realistic, professional, and free of placeholders, based on codebase analysis.",
+          user: `You are an expert README generator. Re-write the following draft README file to make it perfect, professional, and fully completed.
 Follow these rules strictly:
 1. Project Name: Format the repository name "${repoName || repo.split("/")[1]}" properly without special symbols or underscores (e.g. easy_deploy becomes "Easy Deploy", repo_1782114619665_nj2br becomes "Repo 1782114619665 Nj2br").
 2. Logo: Include the project logo at the top using this exact HTML tag (do not change or modify the URL):
@@ -1758,21 +1831,18 @@ ${repoCtx.fileContents}
 === DRAFT README FROM README-AI ===
 ${content}
 
-Output only the updated, complete README markdown content. Do not include any conversational preamble or markdown code blocks wrap outside of the markdown itself.`,
-          config: {
-            systemInstruction: "You edit and improve README.md files to make them complete, realistic, professional, and free of placeholders, based on codebase analysis."
-          }
+Output only the updated, complete README markdown content. Do not include any conversational preamble or markdown code blocks wrap outside of the markdown itself.`
         });
-        if (rewriteResponse.text) {
-          finalMarkdown = rewriteResponse.text.trim();
+        if (rewriteText) {
+          finalMarkdown = rewriteText.trim();
           // Remove markdown wrappers if any
           const fenceMatch = finalMarkdown.match(/```(?:markdown)?\s*\n?([\s\S]*?)\n?```/i);
           if (fenceMatch) {
             finalMarkdown = fenceMatch[1].trim();
           }
         }
-      } catch (geminiErr: any) {
-        console.error("Gemini post-processing rewrite failed:", geminiErr);
+      } catch (groqErr: any) {
+        console.error("Groq post-processing rewrite failed:", groqErr);
       }
     }
 
@@ -1790,22 +1860,21 @@ Output only the updated, complete README markdown content. Do not include any co
   }
 });
 
-// Edit/refine generated README via Gemini LLM using instructions
+// Edit/refine generated README via Groq LLM using instructions
 app.post("/api/readme/modify", async (req, res) => {
   const { content, instruction } = req.body;
   if (!content || !instruction) {
     return res.status(400).json({ error: "Missing content or instruction" });
   }
   
-  const ai = getAI();
-  if (!ai) {
-    return res.status(500).json({ error: "Gemini AI client not initialized" });
+  if (!getGroq()) {
+    return res.status(500).json({ error: "Groq AI client not initialized" });
   }
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: `You are a professional documentation editor. Modify the following README markdown content based on the user's instructions.
+    const refined = await generateGroqText({
+      system: "You edit markdown documents directly. You output only the edited document content with no conversational text.",
+      user: `You are a professional documentation editor. Modify the following README markdown content based on the user's instructions.
       
 Current README:
 ${content}
@@ -1813,13 +1882,16 @@ ${content}
 User Instructions:
 ${instruction}
 
-Output only the updated complete README markdown content. Do not include any conversational preamble or markdown code blocks wraps outside of the markdown itself.`,
-      config: {
-        systemInstruction: "You edit markdown documents directly. You output only the edited document content with no conversational text."
-      }
+Output only the updated complete README markdown content. Do not include any conversational preamble or markdown code blocks wraps outside of the markdown itself.`
     });
 
-    res.json({ status: "success", content: response.text || content });
+    let finalContent = refined || content;
+    const fenceMatch = finalContent.match(/```(?:markdown)?\s*\n?([\s\S]*?)\n?```/i);
+    if (fenceMatch) {
+      finalContent = fenceMatch[1].trim();
+    }
+
+    res.json({ status: "success", content: finalContent });
   } catch (err: any) {
     res.status(500).json({ error: err.message || "Failed to refine README" });
   }
@@ -2461,9 +2533,7 @@ app.post("/api/kb/query", async (req, res) => {
 
     let finalAnswer = "";
     if (!ai) {
-      const filename = topChunks[0].chunk.filename;
-      const header = topChunks[0].chunk.header;
-      finalAnswer = `Based on the provided chunk ${filename}, here is the information: CodeLore uses Parcle memory systems to index workspace documentation. We can query these memories semantic RAG search easily.\n\n› Source: ${filename} ${header}`;
+      finalAnswer = buildKnowledgeBaseFallbackAnswer(topChunks);
       
       const words = finalAnswer.split(" ");
       for (const word of words) {
@@ -2530,9 +2600,17 @@ End answers with: › Source: {filename} {header}`;
       console.error("Stream failed", streamErr);
       if (!completed) {
         clearTimeout(timeoutId);
-        res.write(`data: ${JSON.stringify({ token: `\n[Stream Error: ${streamErr.message}]` })}\n\n`);
+        const fallbackAnswer = buildKnowledgeBaseFallbackAnswer(topChunks);
+        const friendlyError = getGeminiFriendlyError(streamErr);
+        finalAnswer = `${friendlyError}\n\n${fallbackAnswer}`;
+        const words = finalAnswer.split(" ");
+        for (const word of words) {
+          res.write(`data: ${JSON.stringify({ token: word + " " })}\n\n`);
+        }
+        await appendHistory("assistant", finalAnswer, sources);
         res.write(`data: [DONE]\n\n`);
         res.end();
+        completed = true;
       }
     }
 

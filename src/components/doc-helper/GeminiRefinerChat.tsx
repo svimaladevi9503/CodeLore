@@ -3,7 +3,7 @@ import React from "react";
 import { MessageSquare, Loader2, Send } from "lucide-react";
 
 export interface ChatMessage {
-  sender: "user" | "gemini";
+  sender: "user" | "assistant";
   text: string;
 }
 
@@ -32,7 +32,7 @@ export default function GeminiRefinerChat({
         }`}
       >
         <MessageSquare className="h-4 w-4 text-teal-400" />
-        <span>Gemini Refiner Chat</span>
+        <span>Groq Refiner Chat</span>
       </h4>
 
       <div
@@ -55,7 +55,7 @@ export default function GeminiRefinerChat({
                   theme === "dark" ? "text-slate-500" : "text-slate-400"
                 }`}
               >
-                {msg.sender === "user" ? "You" : "Gemini"}
+                {msg.sender === "user" ? "You" : "Groq"}
               </span>
               <div
                 className={`p-2.5 rounded-lg leading-relaxed ${
@@ -75,7 +75,7 @@ export default function GeminiRefinerChat({
           {refining && (
             <div className="flex items-center gap-1.5 text-slate-500 font-mono text-[10px] py-1">
               <Loader2 className="h-3 w-3 animate-spin text-teal-500" />
-              <span>Gemini is editing markdown...</span>
+              <span>Groq is editing markdown...</span>
             </div>
           )}
         </div>

@@ -34,8 +34,8 @@ export function useDocHelperLogic(props: UseDocHelperLogicProps) {
   const [commitMessage, setCommitMessage] = useState("chore: update README.md via CodeLore AI");
   
   const [chatInput, setChatInput] = useState("");
-  const [chatLogs, setChatLogs] = useState<Array<{ sender: "user" | "gemini"; text: string }>>([
-    { sender: "gemini", text: "I can modify your draft README. Ask me to add sections, change instructions, or reformat text." }
+  const [chatLogs, setChatLogs] = useState<Array<{ sender: "user" | "assistant"; text: string }>>([
+    { sender: "assistant", text: "I can modify your draft README with Groq. Ask me to add sections, change instructions, or reformat text." }
   ]);
 
   const [showSettings, setShowSettings] = useState(false);
@@ -137,7 +137,7 @@ export function useDocHelperLogic(props: UseDocHelperLogicProps) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to run readme-ai generator");
       setDraftContent(data.content);
-      setChatLogs([{ sender: "gemini", text: "Successfully generated the template using readme-ai! Review the preview on the right. You can request specific text refinements or add custom sections here." }]);
+      setChatLogs([{ sender: "assistant", text: "Successfully generated the template using readme-ai. Groq can now refine sections, wording, and structure in chat." }]);
     } catch (err: any) {
       showToast("error", err.message || "Generation failed");
     } finally {
@@ -163,9 +163,9 @@ export function useDocHelperLogic(props: UseDocHelperLogicProps) {
       if (!res.ok) throw new Error("Failed to refine text");
       const data = await res.json();
       setDraftContent(data.content);
-      setChatLogs(prev => [...prev, { sender: "gemini", text: "Refined draft successfully. Changes are applied to the preview." }]);
+      setChatLogs(prev => [...prev, { sender: "assistant", text: "Refined draft successfully. Changes are applied to the preview." }]);
     } catch (err: any) {
-      setChatLogs(prev => [...prev, { sender: "gemini", text: `Error modifying README: ${err.message || "Connection failed"}` }]);
+      setChatLogs(prev => [...prev, { sender: "assistant", text: `Error modifying README: ${err.message || "Connection failed"}` }]);
     } finally {
       setRefining(false);
     }
