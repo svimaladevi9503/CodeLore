@@ -9,7 +9,7 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 RUN apk add --no-cache git python3 py3-pip python3-dev build-base && \
     python3 -m venv .venv && \
-    .venv/bin/pip install --no-cache-dir readme-ai && \
+    .venv/bin/pip install --no-cache-dir readmeai && \
     apk del python3-dev build-base
 
 COPY package*.json ./
