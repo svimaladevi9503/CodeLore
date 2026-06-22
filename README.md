@@ -1,3 +1,11 @@
+---
+title: CodeLore
+emoji: 👀
+colorFrom: yellow
+colorTo: pink
+sdk: docker
+pinned: false
+---
 
 # Run and deploy your AI Studio app
 
