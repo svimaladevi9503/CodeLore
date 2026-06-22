@@ -1447,17 +1447,28 @@ app.post("/api/kb/ingest", async (req, res) => {
 
     // Append manifest
     const manifestKey = "kb:index:manifest";
-    let manifest = parcleDb.metadata[manifestKey] || [];
-    if (!Array.isArray(manifest)) {
-      manifest = [];
+    const manifestData = parcleDb.metadata[manifestKey];
+    let manifest: any[] = [];
+    if (Array.isArray(manifestData)) {
+      manifest = manifestData;
+    } else if (manifestData && typeof manifestData === "object" && Array.isArray(manifestData.files)) {
+      manifest = manifestData.files;
     }
+    
     manifest = manifest.filter((entry: any) => entry.filename !== filePath);
     manifest.push({
       filename: filePath,
       chunk_count: finalChunks.length,
       indexed_at: timestamp
     });
-    parcleDb.metadata[manifestKey] = manifest;
+    
+    const totalChunks = manifest.reduce((acc: number, entry: any) => acc + (entry.chunk_count || 0), 0);
+    
+    parcleDb.metadata[manifestKey] = {
+      repo_name: repo,
+      chunk_count: totalChunks,
+      files: manifest
+    };
 
     context.last_indexed_file = filePath;
     parcleDb.metadata["orchestrator:active_repo_context"] = context;
@@ -1479,7 +1490,7 @@ app.post("/api/kb/ingest", async (req, res) => {
 
 // Streaming Q&A retrieval (Parcle -> Answer)
 app.post("/api/kb/query", async (req, res) => {
-  const { query } = req.body;
+  const { query, session_id } = req.body;
   if (!query) {
     return res.status(400).json({ error: "Missing query" });
   }
@@ -1487,6 +1498,61 @@ app.post("/api/kb/query", async (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
+
+  const repoContext = parcleDb.metadata?.["orchestrator:active_repo_context"] || {};
+  const repo_name = repoContext.active_repo || "custom-docs";
+
+  let chunk_count = 0;
+  let top_3_filenames_from_manifest = "";
+  const manifest = parcleDb.metadata?.["kb:index:manifest"] || [];
+  const manifestFiles = Array.isArray(manifest) ? manifest : (manifest.files || []);
+  chunk_count = manifestFiles.reduce((acc: number, entry: any) => acc + (entry.chunk_count || 0), 0);
+  top_3_filenames_from_manifest = manifestFiles.slice(0, 3).map((e: any) => e.filename).join(", ");
+  if (!top_3_filenames_from_manifest) {
+    top_3_filenames_from_manifest = "README.md, agents.md, parcle_memory_api.md";
+  }
+
+  // --- INTENT CLASSIFIER ---
+  const normalizedQuery = query.trim().toLowerCase();
+  
+  const greetings = ["hi", "hello", "hey", "sup", "yo", "hii", "heyy", "good morning", "good evening", "what's up", "howdy"];
+  const gratitude = ["thanks", "thank you", "thx", "ty", "great", "perfect", "awesome", "got it"];
+  const identity = ["who are you", "what are you", "what can you do", "what do you know", "your capabilities"];
+
+  const appendHistory = async (role: string, content: string, chunks_used?: any[]) => {
+    if (!session_id) return;
+    const historyKey = `kb:chat:history:${session_id}`;
+    if (!parcleDb.metadata) parcleDb.metadata = {};
+    const history = parcleDb.metadata[historyKey] || [];
+    history.push({ role, content, timestamp: new Date().toISOString(), chunks_used });
+    parcleDb.metadata[historyKey] = history;
+    await saveParcle();
+  };
+
+  const streamImmediateResponse = async (text: string) => {
+    await appendHistory("user", query);
+    await appendHistory("assistant", text);
+    const words = text.split(" ");
+    for (let i = 0; i < words.length; i++) {
+      const token = words[i] + (i === words.length - 1 ? "" : " ");
+      res.write(`data: ${JSON.stringify({ token })}\n\n`);
+      await new Promise(resolve => setTimeout(resolve, 30));
+    }
+    res.write(`data: [DONE]\n\n`);
+    res.end();
+  };
+
+  if (greetings.includes(normalizedQuery)) {
+    return streamImmediateResponse(`Hey! How can I help you with ${repo_name} today? You can ask me about ${top_3_filenames_from_manifest}.`);
+  }
+
+  if (gratitude.includes(normalizedQuery)) {
+    return streamImmediateResponse(`Glad that helped! Anything else about the codebase?`);
+  }
+
+  if (identity.includes(normalizedQuery)) {
+    return streamImmediateResponse(`I'm CodeLore's RAG specialist. I have ${chunk_count} indexed chunks from ${repo_name} in Parcle memory. Ask me about any file, function, or flow in the repo.`);
+  }
 
   try {
     let queryEmbedding: number[] = [];
@@ -1517,22 +1583,12 @@ app.post("/api/kb/query", async (req, res) => {
 
     if (kbChunks.length === 0) {
       let suggested = "README.md";
-      const manifest = parcleDb.metadata?.["kb:index:manifest"] || [];
-      if (Array.isArray(manifest) && manifest.length > 0) {
-        const queryLower = query.toLowerCase();
-        let bestScore = 0;
-        for (const entry of manifest) {
-          const fn = entry.filename.toLowerCase();
-          const overlap = computeTokenOverlap(queryLower, fn);
-          if (overlap > bestScore) {
-            bestScore = overlap;
-            suggested = entry.filename;
-          }
-        }
+      if (manifestFiles.length > 0) {
+        suggested = manifestFiles[0].filename;
       }
       const emptyMsg = JSON.stringify({
         error: "no_results",
-        message: `No matching knowledge found. Try adding ${suggested} to the knowledge base.`,
+        message: `I don't have that in my knowledge base yet. Try adding ${suggested} to get that answer.`,
         suggested_filename: suggested
       });
       res.write(`data: ${emptyMsg}\n\n`);
@@ -1556,13 +1612,12 @@ app.post("/api/kb/query", async (req, res) => {
 
     if (topChunks.length === 0) {
       let suggested = "README.md";
-      const manifest = parcleDb.metadata?.["kb:index:manifest"] || [];
-      if (Array.isArray(manifest) && manifest.length > 0) {
-        suggested = manifest[0].filename;
+      if (manifestFiles.length > 0) {
+        suggested = manifestFiles[0].filename;
       }
       const emptyMsg = JSON.stringify({
         error: "no_results",
-        message: `No matching knowledge found. Try adding ${suggested} to the knowledge base.`,
+        message: `I don't have that in my knowledge base yet. Try adding ${suggested} to get that answer.`,
         suggested_filename: suggested
       });
       res.write(`data: ${emptyMsg}\n\n`);
@@ -1592,24 +1647,58 @@ app.post("/api/kb/query", async (req, res) => {
       }
     }
 
+    // Fetch conversation history
+    let last3Turns: any[] = [];
+    if (session_id) {
+      const historyKey = `kb:chat:history:${session_id}`;
+      const history = parcleDb.metadata?.[historyKey] || [];
+      last3Turns = history.slice(-3);
+    }
+
     const ai = getAI();
+    let suggested_file = "README.md";
+    if (manifestFiles.length > 0) {
+      const matched = manifestFiles.find((f: any) => query.toLowerCase().includes(f.filename.toLowerCase()));
+      suggested_file = matched ? matched.filename : manifestFiles[0].filename;
+    }
+
+    await appendHistory("user", query);
+
+    let finalAnswer = "";
     if (!ai) {
-      const mockResponse = `Based on the provided chunk ${topChunks[0].chunk.filename}, here is the information: CodeLore uses Parcle memory systems to index workspace documentation. We can query these memories semantic RAG search easily.\n\nSource: ${topChunks[0].chunk.filename} › ${topChunks[0].chunk.header}`;
-      const words = mockResponse.split(" ");
+      const filename = topChunks[0].chunk.filename;
+      const header = topChunks[0].chunk.header;
+      finalAnswer = `Based on the provided chunk ${filename}, here is the information: CodeLore uses Parcle memory systems to index workspace documentation. We can query these memories semantic RAG search easily.\n\n› Source: ${filename} ${header}`;
+      
+      const words = finalAnswer.split(" ");
       for (const word of words) {
         res.write(`data: ${JSON.stringify({ token: word + " " })}\n\n`);
         await new Promise(resolve => setTimeout(resolve, 80));
       }
+      await appendHistory("assistant", finalAnswer, sources);
       res.write(`data: [DONE]\n\n`);
       res.end();
       return;
     }
 
-    const systemPrompt = `You are CodeLore's knowledge assistant. Answer ONLY from the provided context chunks. Be concise — max 3 sentences unless the user asks for detail. Always end your answer with: Source: {filename} › {header}`;
+    const systemPrompt = `You are CodeLore, an intelligent codebase assistant for the repo ${repo_name}. Answer using ONLY the context chunks provided. Be concise (2-3 sentences). If the answer isn't in context, say exactly:
+'I don't have that in my knowledge base yet. Try adding ${suggested_file} to get that answer.'
+Never say 'No matching knowledge found.' — always suggest a next action instead.
+End answers with: › Source: {filename} {header}`;
+
+    let userPromptContent = "";
+    if (last3Turns.length > 0) {
+      userPromptContent += "Last 3 turns of conversation history:\n";
+      for (const turn of last3Turns) {
+        userPromptContent += `${turn.role === "user" ? "User" : "Assistant"}: ${turn.content}\n`;
+      }
+      userPromptContent += "\n";
+    }
+    userPromptContent += `Context chunks:\n${contextStr}\n\nQuestion: ${query}`;
 
     const streamPromise = ai.models.generateContentStream({
       model: "gemini-3.5-flash",
-      contents: `Context chunks:\n${contextStr}\n\nQuestion: ${query}`,
+      contents: userPromptContent,
       config: {
         systemInstruction: systemPrompt
       }
@@ -1631,11 +1720,13 @@ app.post("/api/kb/query", async (req, res) => {
         if (completed) break;
         const text = chunk.text;
         if (text) {
+          finalAnswer += text;
           res.write(`data: ${JSON.stringify({ token: text })}\n\n`);
         }
       }
       if (!completed) {
         clearTimeout(timeoutId);
+        await appendHistory("assistant", finalAnswer, sources);
         res.write(`data: [DONE]\n\n`);
         res.end();
         completed = true;

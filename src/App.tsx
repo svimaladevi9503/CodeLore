@@ -87,6 +87,7 @@ interface KbState {
   chunkAddSuccess: boolean;
   activeCitationText: string | null;
   firstTokenReceived?: boolean;
+  sessionId: string;
 }
 type KbAction =
   | { type: "SET_QUERY"; value: string }
@@ -99,7 +100,8 @@ type KbAction =
   | { type: "SET_CITATION"; value: string | null }
   | { type: "ADD_OR_UPDATE_STREAMING_MSG"; value: any }
   | { type: "UPDATE_STREAMING_MSG"; id: string; value: any }
-  | { type: "SET_FIRST_TOKEN_RECEIVED"; value: boolean };
+  | { type: "SET_FIRST_TOKEN_RECEIVED"; value: boolean }
+  | { type: "SET_SESSION_ID"; value: string };
 
 const kbReducer = (state: KbState, action: KbAction): KbState => {
   switch (action.type) {
@@ -112,6 +114,7 @@ const kbReducer = (state: KbState, action: KbAction): KbState => {
     case "SET_ADD_SUCCESS": return { ...state, chunkAddSuccess: action.value };
     case "SET_CITATION": return { ...state, activeCitationText: action.value };
     case "SET_FIRST_TOKEN_RECEIVED": return { ...state, firstTokenReceived: action.value };
+    case "SET_SESSION_ID": return { ...state, sessionId: action.value };
     case "ADD_OR_UPDATE_STREAMING_MSG": {
       const exists = state.chatLog.some(msg => (msg as any).id === action.value.id);
       if (exists) {
@@ -609,20 +612,15 @@ index c92b8d1..db3d6a2 105655
 
   const [kbState, dispatchKb] = useReducer(kbReducer, {
     userQuery: "",
-    chatLog: [
-      {
-        sender: "agent",
-        text: "Hello! I am the Knowledge Base RAG Specialist. Ask me any conceptual or operational questions about the codebase.",
-        timestamp: new Date().toLocaleTimeString()
-      }
-    ],
+    chatLog: [],
     chatLoading: false,
     newChunkFile: "api_endpoints.md",
     newChunkSection: "Authentication Headers",
     newChunkContent: "All requests to our microservice gate require signature matching inside headers.",
     chunkAddSuccess: false,
     activeCitationText: null,
-    firstTokenReceived: false
+    firstTokenReceived: false,
+    sessionId: Math.random().toString(36).substring(2, 15)
   });
 
   const [cleanerState, dispatchCleaner] = useReducer(cleanerReducer, {
@@ -753,9 +751,90 @@ export default function Sandbox() {
     }
   };
 
+  const [activeRepoName, setActiveRepoName] = React.useState<string>("");
+  const [switchBanner, setSwitchBanner] = React.useState<{ show: boolean; repoName: string }>({ show: false, repoName: "" });
+
   useEffect(() => {
     fetchDiagnostics();
   }, []);
+
+  // Poll active repo context every 5s and handle repo switch
+  useEffect(() => {
+    const pollRepo = async () => {
+      try {
+        const res = await fetch("/api/orchestrate/context");
+        const data = await res.json();
+        if (data.status === "success" && data.context) {
+          const newRepo = data.context.active_repo;
+          if (activeRepoName && newRepo !== activeRepoName) {
+            setActiveRepoName(newRepo);
+            setSwitchBanner({ show: true, repoName: newRepo });
+
+            // Reset session
+            const newSessionId = Math.random().toString(36).substring(2, 15);
+            dispatchKb({ type: "SET_SESSION_ID", value: newSessionId });
+
+            // Clear chat log
+            dispatchKb({ type: "SET_LOG", value: [] });
+
+            // Re-fetch manifest/records
+            await fetchDiagnostics();
+          } else if (!activeRepoName) {
+            setActiveRepoName(newRepo);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to poll active repo context:", err);
+      }
+    };
+
+    pollRepo();
+    const interval = setInterval(pollRepo, 5000);
+    return () => clearInterval(interval);
+  }, [activeRepoName]);
+
+  // Dynamic welcome message updates based on Parcle key kb:index:manifest
+  useEffect(() => {
+    if (uiState.parcleData) {
+      const manifest = uiState.parcleData.metadata?.["kb:index:manifest"];
+      let chunk_count = 0;
+      let repo_name = activeRepoName || docHelperState.repoName || "custom-docs";
+      let isEmpty = true;
+
+      if (manifest) {
+        if (Array.isArray(manifest)) {
+          chunk_count = manifest.reduce((acc: number, curr: any) => acc + (curr.chunk_count || 0), 0);
+          isEmpty = manifest.length === 0;
+        } else if (typeof manifest === "object") {
+          chunk_count = manifest.chunk_count || 0;
+          repo_name = manifest.repo_name || repo_name;
+          isEmpty = !manifest.files || manifest.files.length === 0;
+        }
+      }
+
+      const activeRepo = uiState.parcleData.metadata?.["orchestrator:active_repo_context"]?.active_repo || repo_name;
+
+      const welcomeText = isEmpty
+        ? "Hey! No knowledge indexed yet. Add a file above to get started."
+        : `Hey! I'm CodeLore's knowledge assistant. I'm loaded with ${chunk_count} memory chunks from ${activeRepo}. Ask me anything about the codebase.`;
+
+      dispatchKb({
+        type: "SET_LOG",
+        value: (prev) => {
+          const newMsg = {
+            sender: "agent" as const,
+            text: welcomeText,
+            timestamp: prev[0]?.timestamp || new Date().toLocaleTimeString()
+          };
+          if (prev.length === 0) return [newMsg];
+          if (prev[0].sender === "agent" && (prev[0].text.startsWith("Hey!") || prev[0].text.startsWith("Hello!"))) {
+            return [newMsg, ...prev.slice(1)];
+          }
+          return prev;
+        }
+      });
+    }
+  }, [uiState.parcleData, activeRepoName, docHelperState.repoName]);
 
   // Run Orchestrator Sandbox Dispatcher
   const dispatchOrchEvent = async () => {
@@ -871,7 +950,7 @@ export default function Sandbox() {
       const res = await fetch("/api/kb/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: qTemp })
+        body: JSON.stringify({ query: qTemp, session_id: kbState.sessionId })
       });
 
       if (!res.ok) {
@@ -1079,7 +1158,10 @@ export default function Sandbox() {
     triggerCleanerScan,
     applyCleanerPatch,
     runPipelineCheck,
-    fetchDiagnostics
+    fetchDiagnostics,
+    activeRepoName,
+    switchBanner,
+    setSwitchBanner
   };
 }
 
@@ -1103,7 +1185,10 @@ export default function App() {
     addNewKnowledgeChunk,
     triggerCleanerScan,
     applyCleanerPatch,
-    fetchDiagnostics
+    fetchDiagnostics,
+    activeRepoName,
+    switchBanner,
+    setSwitchBanner
   } = useAppLogic();
 
   return (
@@ -1200,8 +1285,10 @@ export default function App() {
                     setActiveCitationText={(val) => dispatchKb({ type: "SET_CITATION", value: val })}
                     theme={uiState.theme}
                     parcleData={uiState.parcleData}
-                    repoName="custom-docs"
+                    repoName={activeRepoName || "custom-docs"}
                     fetchDiagnostics={fetchDiagnostics}
+                    switchBanner={switchBanner}
+                    setSwitchBanner={setSwitchBanner}
                   />
                 </m.div>
               )}
