@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { ChevronRight, ChevronDown, Layers, Github, LogOut, FolderGit, Loader2, KeyRound } from "lucide-react";
+import { ChevronRight, ChevronDown, Layers, Github, LogOut, FolderGit, Loader2, KeyRound, Search, Check } from "lucide-react";
 import { m, AnimatePresence } from "motion/react";
 
 const getAgentColor = (route: string) => {
@@ -62,6 +62,8 @@ export default function OrchestratorView({
   const [ghRepos, setGhRepos] = useState<Array<{ id: number; name: string; full_name: string }>>([]);
   const [loadingGh, setLoadingGh] = useState(false);
   const [errorGh, setErrorGh] = useState("");
+  const [repoDropdownOpen, setRepoDropdownOpen] = useState(false);
+  const [repoSearch, setRepoSearch] = useState("");
 
   const fetchGithubData = async (accessToken: string) => {
     setLoadingGh(true);
@@ -263,27 +265,128 @@ export default function OrchestratorView({
               </div>
             </div>
 
-            <div className="flex flex-col gap-1 w-full md:w-[250px]">
-              <label htmlFor="repo-select" className={`text-[10px] font-sans font-medium ${
+            <div className="flex flex-col gap-1 w-full md:w-[260px] relative">
+              <label className={`text-[10px] font-sans font-medium ${
                 theme === "dark" ? "text-slate-400" : "text-slate-500"
               }`}>Target repository</label>
-              <select
+
+              {/* Custom dropdown trigger */}
+              <button
+                type="button"
                 id="repo-select"
-                value={repoName}
-                onChange={(e) => setRepoName(e.target.value)}
-                className={`border rounded-lg text-[12px] font-sans font-normal p-2.5 outline-none focus:border-purple-500 transition cursor-pointer ${
-                  theme === "dark"
-                    ? "bg-slate-950 border-slate-800 text-slate-200"
-                    : "bg-white border-slate-200 text-slate-850"
+                onClick={() => { setRepoDropdownOpen(o => !o); setRepoSearch(""); }}
+                className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border text-[12px] font-sans font-normal cursor-pointer transition-all outline-none w-full ${
+                  repoDropdownOpen
+                    ? theme === "dark"
+                      ? "border-purple-500 bg-slate-900"
+                      : "border-purple-500 bg-white"
+                    : theme === "dark"
+                      ? "border-slate-800 bg-slate-950 hover:border-slate-700"
+                      : "border-slate-200 bg-white hover:border-slate-300"
                 }`}
               >
-                <option value="" disabled>Select repository...</option>
-                {ghRepos.map((repo) => (
-                  <option key={repo.id} value={repo.name}>
-                    {repo.full_name}
-                  </option>
-                ))}
-              </select>
+                <span className={`truncate ${
+                  repoName
+                    ? theme === "dark" ? "text-slate-100" : "text-slate-800"
+                    : theme === "dark" ? "text-slate-500" : "text-slate-400"
+                }`}>
+                  {repoName
+                    ? ghRepos.find(r => r.name === repoName)?.full_name ?? repoName
+                    : "Select repository..."}
+                </span>
+                <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${
+                  repoDropdownOpen ? "rotate-180 text-purple-400" : theme === "dark" ? "text-slate-500" : "text-slate-400"
+                }`} />
+              </button>
+
+              {/* Dropdown panel */}
+              <AnimatePresence>
+                {repoDropdownOpen && (
+                  <m.div
+                    initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                    transition={{ duration: 0.15, ease: "easeOut" }}
+                    className={`absolute top-full mt-1.5 left-0 right-0 z-50 rounded-xl border overflow-hidden shadow-2xl ${
+                      theme === "dark"
+                        ? "bg-slate-900 border-slate-800"
+                        : "bg-white border-slate-200"
+                    }`}
+                    style={{ maxHeight: 260 }}
+                  >
+                    {/* Search input */}
+                    <div className={`flex items-center gap-2 px-3 py-2 border-b ${
+                      theme === "dark" ? "border-slate-800" : "border-slate-100"
+                    }`}>
+                      <Search className={`h-3.5 w-3.5 shrink-0 ${
+                        theme === "dark" ? "text-slate-500" : "text-slate-400"
+                      }`} />
+                      <input
+                        autoFocus
+                        type="text"
+                        placeholder="Search repos..."
+                        value={repoSearch}
+                        onChange={e => setRepoSearch(e.target.value)}
+                        className={`w-full text-[12px] font-sans bg-transparent outline-none ${
+                          theme === "dark"
+                            ? "text-slate-200 placeholder-slate-600"
+                            : "text-slate-800 placeholder-slate-400"
+                        }`}
+                      />
+                    </div>
+
+                    {/* Options list */}
+                    <div className="overflow-y-auto" style={{ maxHeight: 200 }}>
+                      {ghRepos
+                        .filter(r =>
+                          r.full_name.toLowerCase().includes(repoSearch.toLowerCase())
+                        )
+                        .length === 0 ? (
+                          <div className={`px-4 py-3 text-[12px] text-center ${
+                            theme === "dark" ? "text-slate-500" : "text-slate-400"
+                          }`}>
+                            No repos match "{repoSearch}"
+                          </div>
+                        ) : (
+                          ghRepos
+                            .filter(r =>
+                              r.full_name.toLowerCase().includes(repoSearch.toLowerCase())
+                            )
+                            .map(repo => {
+                              const isSelected = repoName === repo.name;
+                              return (
+                                <button
+                                  key={repo.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setRepoName(repo.name);
+                                    setRepoDropdownOpen(false);
+                                    setRepoSearch("");
+                                  }}
+                                  className={`w-full text-left flex items-center justify-between gap-2 px-3 py-2.5 text-[12px] font-sans transition-colors cursor-pointer ${
+                                    isSelected
+                                      ? theme === "dark"
+                                        ? "bg-purple-500/10 text-purple-300"
+                                        : "bg-purple-50 text-purple-700"
+                                      : theme === "dark"
+                                        ? "text-slate-300 hover:bg-slate-800"
+                                        : "text-slate-700 hover:bg-slate-50"
+                                  }`}
+                                >
+                                  <div className="flex flex-col min-w-0">
+                                    <span className="truncate font-medium">{repo.full_name}</span>
+                                  </div>
+                                  {isSelected && (
+                                    <Check className="h-3.5 w-3.5 shrink-0 text-purple-400" />
+                                  )}
+                                </button>
+                              );
+                            })
+                        )}
+                    </div>
+                  </m.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
 
