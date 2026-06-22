@@ -1094,16 +1094,11 @@ export default function App() {
                     chatLog={kbState.chatLog}
                     chatLoading={kbState.chatLoading}
                     queryKnowledgeBase={queryKnowledgeBase}
-                    newChunkFile={kbState.newChunkFile}
-                    setNewChunkFile={(val) => dispatchKb({ type: "SET_NEW_FILE", value: val })}
-                    newChunkSection={kbState.newChunkSection}
-                    setNewChunkSection={(val) => dispatchKb({ type: "SET_NEW_SECTION", value: val })}
-                    newChunkContent={kbState.newChunkContent}
-                    setNewChunkContent={(val) => dispatchKb({ type: "SET_NEW_CONTENT", value: val })}
-                    addNewKnowledgeChunk={addNewKnowledgeChunk}
-                    chunkAddSuccess={kbState.chunkAddSuccess}
                     activeCitationText={kbState.activeCitationText}
                     setActiveCitationText={(val) => dispatchKb({ type: "SET_CITATION", value: val })}
+                    theme={uiState.theme}
+                    parcleData={uiState.parcleData}
+                    repoName="custom-docs"
                   />
                 </m.div>
               )}

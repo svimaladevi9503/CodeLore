@@ -15,16 +15,11 @@ interface KnowledgeBaseViewProps {
   chatLog: Array<{ sender: "user" | "agent"; text: string; sources?: any[]; timestamp: string }>;
   chatLoading: boolean;
   queryKnowledgeBase: () => void;
-  newChunkFile: string;
-  setNewChunkFile: (val: string) => void;
-  newChunkSection: string;
-  setNewChunkSection: (val: string) => void;
-  newChunkContent: string;
-  setNewChunkContent: (val: string) => void;
-  addNewKnowledgeChunk: (e: React.FormEvent) => void;
-  chunkAddSuccess: boolean;
   activeCitationText: string | null;
   setActiveCitationText: (val: string | null) => void;
+  theme: "light" | "dark";
+  parcleData: any;
+  repoName: string;
 }
 
 export default function KnowledgeBaseView({
@@ -33,17 +28,46 @@ export default function KnowledgeBaseView({
   chatLog,
   chatLoading,
   queryKnowledgeBase,
-  newChunkFile,
-  setNewChunkFile,
-  newChunkSection,
-  setNewChunkSection,
-  newChunkContent,
-  setNewChunkContent,
-  addNewKnowledgeChunk,
-  chunkAddSuccess,
   activeCitationText,
-  setActiveCitationText
+  setActiveCitationText,
+  theme,
+  parcleData,
+  repoName
 }: KnowledgeBaseViewProps) {
+  const [selectedFile, setSelectedFile] = React.useState<string | null>(null);
+
+  const mostRecentFile = React.useMemo(() => {
+    if (!parcleData?.v_store || parcleData.v_store.length === 0) return null;
+    return parcleData.v_store[parcleData.v_store.length - 1].filename;
+  }, [parcleData]);
+
+  const activeFile = selectedFile || mostRecentFile;
+
+  const { displayText, linkUrl } = React.useMemo(() => {
+    const baseRepoUrl = `https://github.com/svimaladevi9503/${repoName}`;
+    if (!activeFile) {
+      return {
+        displayText: `${repoName}/ —`,
+        linkUrl: baseRepoUrl
+      };
+    }
+    
+    const normalizedPath = activeFile.replace(/\\/g, "/");
+    const parts = normalizedPath.split("/");
+    const fileName = parts.pop() || "";
+    const folderName = parts.join("/");
+    
+    const formattedPath = folderName 
+      ? `${repoName}/${folderName}/${fileName}`
+      : `${repoName}/${fileName}`;
+      
+    const fileLink = `${baseRepoUrl}/blob/main/${normalizedPath}`;
+    
+    return {
+      displayText: formattedPath,
+      linkUrl: fileLink
+    };
+  }, [activeFile, repoName]);
   const chatItems = React.useMemo(() => {
     return chatLog.map((msg, idx) => ({
       id: `chat-msg-${idx}-${msg.sender}-${msg.timestamp}`,
@@ -73,68 +97,22 @@ export default function KnowledgeBaseView({
         </p>
       </div>
 
-      {/* Accordion indexer */}
-      <div className="border border-slate-850 bg-slate-900/10 rounded-xl p-3 shrink-0">
-        <details className="group">
-          <summary className="flex items-center justify-between text-[12px] font-sans font-normal text-slate-300 cursor-pointer select-none">
-            <div className="flex items-center gap-2">
-              <PlusCircle className="h-4 w-4 text-emerald-400 group-open:rotate-45 transition-transform" />
-              <span>Vector store manager (register custom chunk)</span>
-            </div>
-            <ChevronRight className="h-3.5 w-3.5 text-slate-500 group-open:rotate-90 transition-transform" />
-          </summary>
-
-          <form onSubmit={addNewKnowledgeChunk} className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3 pt-3 border-t border-slate-800">
-            <div className="flex flex-col gap-1">
-              <label htmlFor="doc-filename-input" className="text-[11px] font-mono text-slate-500">Document filename</label>
-              <input
-                id="doc-filename-input"
-                type="text"
-                placeholder="e.g. storage_driver.ts"
-                value={newChunkFile}
-                onChange={(e) => setNewChunkFile(e.target.value)}
-                aria-label="Document filename"
-                className="bg-slate-950 border border-slate-800 rounded p-1.5 text-[12px] font-mono outline-none text-slate-300"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label htmlFor="section-topic-input" className="text-[11px] font-mono text-slate-500">Header / Section Topic</label>
-              <input
-                id="section-topic-input"
-                type="text"
-                placeholder="e.g. syncWithParcle"
-                value={newChunkSection}
-                onChange={(e) => setNewChunkSection(e.target.value)}
-                aria-label="Header or Section Topic"
-                className="bg-slate-950 border border-slate-800 rounded p-1.5 text-[12px] font-mono outline-none text-slate-300"
-              />
-            </div>
-            <div className="flex flex-col gap-1 md:col-span-2">
-              <label htmlFor="content-body-input" className="text-[11px] font-mono text-slate-500">Snippet Content Body</label>
-              <textarea
-                id="content-body-input"
-                value={newChunkContent}
-                onChange={(e) => setNewChunkContent(e.target.value)}
-                aria-label="Snippet Content Body"
-                rows={2}
-                className="bg-slate-950 border border-slate-800 rounded p-1.5 text-[12px] font-mono outline-none text-slate-300 resize-none"
-              />
-            </div>
-            <div className="md:col-span-2 flex items-center justify-between mt-1 pt-1">
-              {chunkAddSuccess ? (
-                <span className="text-[11px] text-emerald-400 font-mono">✅ Registered securely in Parcle storage cabinet</span>
-              ) : (
-                <span></span>
-              )}
-              <button
-                type="submit"
-                className="bg-emerald-500 hover:bg-emerald-400 text-black font-sans text-[11px] font-bold py-1 px-3 rounded cursor-pointer transition active:scale-95 ml-auto"
-              >
-                Register Chunk
-              </button>
-            </div>
-          </form>
-        </details>
+      <div className="shrink-0 flex">
+        <a
+          href={linkUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`inline-flex items-center gap-1.5 text-[11px] font-mono font-normal px-2.5 py-1 rounded border transition-colors duration-250 select-none cursor-pointer ${
+            theme === "dark"
+              ? "text-slate-400 bg-slate-900 border-slate-800 hover:text-white hover:border-slate-700"
+              : "text-[#024D33] bg-[#eef3f1] border-emerald-200 hover:bg-[#e4ece9] hover:text-[#013524]"
+          }`}
+        >
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" className="shrink-0">
+            <path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.35 3.12.88.01.47.01.84.01.93 0 .22-.16.47-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/>
+          </svg>
+          <span>{displayText}</span>
+        </a>
       </div>
 
       {/* Conversational Screen container */}
@@ -181,7 +159,10 @@ export default function KnowledgeBaseView({
                           <button
                             type="button"
                             key={`citation-${src.filename}-${src.section}`}
-                            onClick={() => setActiveCitationText(citationText)}
+                            onClick={() => {
+                              setActiveCitationText(citationText);
+                              setSelectedFile(src.filename);
+                            }}
                             className="text-[10px] bg-slate-950 border border-slate-850 px-2 py-0.5 rounded text-blue-400 font-mono hover:border-blue-500/40 hover:text-blue-300 cursor-pointer inline-flex items-center gap-1 active:scale-95 transition"
                           >
                             📂 {src.filename} › {src.section}
