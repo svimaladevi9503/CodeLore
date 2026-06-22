@@ -1074,62 +1074,11 @@ function isPathIgnored(filePath: string, ignorePatterns: RegExp[]): boolean {
 // GET /api/cleaner/tree — Fetch project tree from GitHub with ignore filtering
 app.get("/api/cleaner/tree", async (req, res) => {
   try {
-    if (!parcleDb.metadata) parcleDb.metadata = {};
-    const context = parcleDb.metadata["orchestrator:active_repo_context"] || {
-      active_repo: "custom-docs", active_branch: "main"
-    };
+    const tree = buildLocalCleanerTree(process.cwd());
+    const ignoredCount = tree.filter(node => node.ignored).length;
+    const repo = path.basename(process.cwd());
+    const branch = "main";
     const owner = getGitOwner();
-    const repo = context.active_repo || "custom-docs";
-    const branch = context.active_branch || "main";
-
-    const headers: Record<string, string> = {
-      "User-Agent": "CodeLore-App",
-      "Accept": "application/vnd.github.v3+json"
-    };
-    if (process.env.GITHUB_TOKEN) {
-      headers["Authorization"] = `token ${process.env.GITHUB_TOKEN}`;
-    }
-
-    // Fetch tree
-    const treeUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
-    const treeRes = await fetch(treeUrl, { headers });
-    if (!treeRes.ok) {
-      return res.status(treeRes.status).json({ error: `GitHub tree fetch failed: ${treeRes.statusText}` });
-    }
-    const treeData = await treeRes.json();
-    const rawTree = (treeData.tree || []) as Array<{ path: string; type: string; size?: number; sha: string }>;
-
-    // Fetch .gitignore
-    let gitignorePatterns: RegExp[] = [];
-    try {
-      const giUrl = `https://api.github.com/repos/${owner}/${repo}/contents/.gitignore?ref=${branch}`;
-      const giRes = await fetch(giUrl, { headers });
-      if (giRes.ok) {
-        const giData = await giRes.json();
-        if (giData.content) {
-          const giContent = Buffer.from(giData.content, giData.encoding || 'base64').toString('utf8');
-          const lines = giContent.split(/\r?\n/).filter(l => l.trim() && !l.startsWith('#'));
-          gitignorePatterns = lines.map(l => globToRegex(l));
-        }
-      }
-    } catch (e) { /* .gitignore is optional */ }
-
-    // Add hardcoded ignores
-    const hardcodedRegexes = HARDCODED_IGNORES.map(p => globToRegex(p));
-    const allIgnorePatterns = [...gitignorePatterns, ...hardcodedRegexes];
-
-    let ignoredCount = 0;
-    const tree = rawTree.map(node => {
-      const ignored = isPathIgnored(node.path, allIgnorePatterns);
-      if (ignored) ignoredCount++;
-      return {
-        path: node.path,
-        type: node.type as 'blob' | 'tree',
-        size: node.size,
-        sha: node.sha,
-        ignored
-      };
-    });
 
     res.json({
       status: "success",
@@ -1151,34 +1100,13 @@ app.get("/api/cleaner/file-content", async (req, res) => {
   try {
     const filePath = req.query.path as string;
     if (!filePath) return res.status(400).json({ error: "Missing path" });
-
-    if (!parcleDb.metadata) parcleDb.metadata = {};
-    const context = parcleDb.metadata["orchestrator:active_repo_context"] || {
-      active_repo: "custom-docs", active_branch: "main"
-    };
-    const owner = getGitOwner();
-    const repo = context.active_repo || "custom-docs";
-    const branch = context.active_branch || "main";
-
-    const headers: Record<string, string> = {
-      "User-Agent": "CodeLore-App",
-      "Accept": "application/vnd.github.v3+json"
-    };
-    if (process.env.GITHUB_TOKEN) {
-      headers["Authorization"] = `token ${process.env.GITHUB_TOKEN}`;
+    const absPath = path.join(process.cwd(), filePath);
+    if (!fs.existsSync(absPath)) {
+      return res.status(404).json({ error: "File not found on local workspace" });
     }
-
-    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${branch}`;
-    const ghRes = await fetch(url, { headers });
-    if (!ghRes.ok) {
-      return res.status(ghRes.status).json({ error: `GitHub file fetch failed: ${ghRes.statusText}` });
-    }
-    const data = await ghRes.json();
-    if (!data.content) {
-      return res.status(400).json({ error: "No content in file" });
-    }
-    const content = Buffer.from(data.content, data.encoding || 'base64').toString('utf8');
-    res.json({ status: "success", content, sha: data.sha, size: data.size });
+    const stat = fs.statSync(absPath);
+    const content = fs.readFileSync(absPath, "utf8");
+    res.json({ status: "success", content, sha: `${stat.size}-${Math.floor(stat.mtimeMs)}`, size: stat.size });
   } catch (err: any) {
     console.error("Cleaner file content error:", err);
     res.status(500).json({ error: err.message });
@@ -1194,24 +1122,11 @@ app.post("/api/cleaner/scan", async (req, res) => {
     }
 
     if (!parcleDb.metadata) parcleDb.metadata = {};
-    const context = parcleDb.metadata["orchestrator:active_repo_context"] || {
-      active_repo: "custom-docs", active_branch: "main"
-    };
-    const owner = getGitOwner();
-    const repoName = repo || context.active_repo || "custom-docs";
-    const branch = context.active_branch || "main";
+    const repoName = repo || path.basename(process.cwd());
 
     // Read existing patch log to skip already-fixed issues
     const patchLogKey = `cleaner:patch_log:${repoName}`;
     const patchLog: any[] = Array.isArray(parcleDb.metadata[patchLogKey]) ? parcleDb.metadata[patchLogKey] : [];
-
-    const headers: Record<string, string> = {
-      "User-Agent": "CodeLore-App",
-      "Accept": "application/vnd.github.v3+json"
-    };
-    if (process.env.GITHUB_TOKEN) {
-      headers["Authorization"] = `token ${process.env.GITHUB_TOKEN}`;
-    }
 
     const ai = getAI();
     const allIssues: any[] = [];
@@ -1251,13 +1166,9 @@ app.post("/api/cleaner/scan", async (req, res) => {
       const p = new Promise<void>((resolve) => {
         const task = async () => {
           try {
-            // Fetch file content
-            const url = `https://api.github.com/repos/${owner}/${repoName}/contents/${file.path}?ref=${branch}`;
-            const ghRes = await fetch(url, { headers });
-            if (!ghRes.ok) { resolve(); return; }
-            const data = await ghRes.json();
-            if (!data.content) { resolve(); return; }
-            const content = Buffer.from(data.content, data.encoding || 'base64').toString('utf8');
+            const absPath = path.join(process.cwd(), file.path);
+            if (!fs.existsSync(absPath)) { resolve(); return; }
+            const content = fs.readFileSync(absPath, "utf8");
 
             let issues: any[] = [];
 
@@ -1830,6 +1741,51 @@ function listLocalRepoFiles(dir: string): string[] {
 
   walk(dir);
   return files;
+}
+
+function buildLocalCleanerTree(dir: string): Array<{ path: string; type: "blob" | "tree"; size?: number; sha: string; ignored?: boolean }> {
+  const nodes: Array<{ path: string; type: "blob" | "tree"; size?: number; sha: string; ignored?: boolean }> = [];
+  const hardcodedRegexes = HARDCODED_IGNORES.map(p => globToRegex(p));
+  const seenDirs = new Set<string>();
+
+  const walk = (currentDir: string) => {
+    const list = fs.readdirSync(currentDir);
+    for (const item of list) {
+      const fullPath = path.join(currentDir, item);
+      const relPath = path.relative(dir, fullPath).replace(/\\/g, "/");
+      if (!relPath || relPath.startsWith(".git")) continue;
+
+      const stat = fs.statSync(fullPath);
+      const ignored = isPathIgnored(relPath, hardcodedRegexes);
+
+      if (stat.isDirectory()) {
+        if (!seenDirs.has(relPath)) {
+          seenDirs.add(relPath);
+          nodes.push({
+            path: relPath,
+            type: "tree",
+            sha: `dir-${relPath}`,
+            ignored
+          });
+        }
+        if (!ignored) {
+          walk(fullPath);
+        }
+        continue;
+      }
+
+      nodes.push({
+        path: relPath,
+        type: "blob",
+        size: stat.size,
+        sha: `${stat.size}-${Math.floor(stat.mtimeMs)}`,
+        ignored
+      });
+    }
+  };
+
+  walk(dir);
+  return nodes.sort((a, b) => a.path.localeCompare(b.path));
 }
 
 function buildLiveRepoQueryContext(query: string): {
