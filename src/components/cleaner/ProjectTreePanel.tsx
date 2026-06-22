@@ -8,6 +8,7 @@ export interface ProjectTreePanelProps {
   theme: string;
   totalCount: number;
   ignoredCount: number;
+  projectDir: string;
   treeLoading: boolean;
   nestedTree: TreeNode[];
   treeDataLength: number;
@@ -19,7 +20,7 @@ export interface ProjectTreePanelProps {
 }
 
 export function ProjectTreePanel({
-  isDark, theme, totalCount, ignoredCount, treeLoading,
+  isDark, theme, totalCount, ignoredCount, projectDir, treeLoading,
   nestedTree, treeDataLength, expandedDirs, selectedFile,
   fetchTree, toggleDir, loadFile
 }: ProjectTreePanelProps) {
@@ -28,12 +29,19 @@ export function ProjectTreePanel({
       isDark ? "bg-[#0f1117] border-slate-800" : "bg-white border-slate-200"
     }`} >
       {/* Tree Header */}
-      <div className={`px-3 py-2 border-b flex items-center justify-between shrink-0 ${
+      <div className={`px-3 py-2 border-b flex items-center justify-between gap-3 shrink-0 ${
         isDark ? "border-slate-800 bg-slate-900/40" : "border-slate-200 bg-slate-50"
       }`}>
-        <span className={`text-[11px] font-mono font-medium ${isDark ? "text-slate-400" : "text-slate-600"}`}>
-          Project Structure
-        </span>
+        <div className="min-w-0">
+          <div className={`text-[11px] font-mono font-medium ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+            Project Structure
+          </div>
+          {projectDir && (
+            <div className={`text-[9px] font-mono truncate mt-0.5 ${isDark ? "text-slate-600" : "text-slate-400"}`} title={projectDir}>
+              {projectDir}
+            </div>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <span className={`text-[9px] font-mono ${isDark ? "text-slate-600" : "text-slate-400"}`}>
             {totalCount} files · {ignoredCount} ignored

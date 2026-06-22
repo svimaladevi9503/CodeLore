@@ -1087,7 +1087,8 @@ app.get("/api/cleaner/tree", async (req, res) => {
       ignored_count: ignoredCount,
       repo,
       branch,
-      owner
+      owner,
+      project_dir: process.cwd()
     });
   } catch (err: any) {
     console.error("Cleaner tree fetch error:", err);

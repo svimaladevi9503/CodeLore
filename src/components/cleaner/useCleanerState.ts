@@ -8,6 +8,7 @@ export function useCleanerState(repoName: string) {
   const [treeLoading, setTreeLoading] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
   const [ignoredCount, setIgnoredCount] = useState(0);
+  const [projectDir, setProjectDir] = useState("");
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string>("");
@@ -41,6 +42,7 @@ export function useCleanerState(repoName: string) {
         setTreeData(data.tree || []);
         setTotalCount(data.total_count || 0);
         setIgnoredCount(data.ignored_count || 0);
+        setProjectDir(data.project_dir || "");
         // Auto-expand top-level directories
         const topDirs = new Set<string>();
         for (const node of (data.tree || [])) {
@@ -269,7 +271,7 @@ export function useCleanerState(repoName: string) {
   }, [fileContent, highlightLines]);
 
   return {
-    treeData, treeLoading, totalCount, ignoredCount, expandedDirs, selectedFile,
+    treeData, treeLoading, totalCount, ignoredCount, projectDir, expandedDirs, selectedFile,
     fileContent, fileLoading, issues, filterSeverity, sortBy, scanProgress, scanning,
     scanError, setScanError, fixError, setFixError,
     showCodeViewer, highlightLines, fixPreview, applyingFix, patchLog,

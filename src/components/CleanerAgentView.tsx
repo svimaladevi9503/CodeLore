@@ -12,7 +12,7 @@ export default function CleanerAgentView({ theme, repoName, owner }: CleanerAgen
   const isDark = theme === "dark";
 
   const {
-    treeData, treeLoading, totalCount, ignoredCount, expandedDirs, selectedFile,
+    treeData, treeLoading, totalCount, ignoredCount, projectDir, expandedDirs, selectedFile,
     fileContent, fileLoading, issues, filterSeverity, sortBy, scanProgress, scanning,
     scanError, setScanError, fixError, setFixError,
     showCodeViewer, highlightLines, fixPreview, applyingFix,
@@ -51,6 +51,7 @@ export default function CleanerAgentView({ theme, repoName, owner }: CleanerAgen
           theme={theme}
           totalCount={totalCount}
           ignoredCount={ignoredCount}
+          projectDir={projectDir}
           treeLoading={treeLoading}
           nestedTree={nestedTree}
           treeDataLength={treeData.length}
