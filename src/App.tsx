@@ -1037,6 +1037,7 @@ export default function App() {
                   transition={{ duration: 0.15 }}
                 >
                   <OrchestratorView
+                    theme={uiState.theme}
                     orchPayload={orchState.payload}
                     setOrchPayload={(val) => dispatchOrch({ type: "SET_PAYLOAD", value: val })}
                     orchEventType={orchState.eventType}

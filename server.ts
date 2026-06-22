@@ -1494,9 +1494,33 @@ app.get("/api/github/callback", async (req, res) => {
               font-weight: 600;
               text-transform: uppercase;
               letter-spacing: 0.1em;
-              color: #475569;
               margin-top: 12px;
               display: block;
+            }
+            @media (prefers-color-scheme: light) {
+              body {
+                background: radial-gradient(circle at center, #f8fafc 0%, #e2e8f0 100%);
+                color: #0f172a;
+              }
+              .container {
+                background: rgba(255, 255, 255, 0.7);
+                border: 1px solid rgba(0, 0, 0, 0.08);
+                box-shadow: 0 20px 50px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+              }
+              h1 {
+                background: linear-gradient(120deg, #0f172a 0%, #334155 100%);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+              }
+              p {
+                color: #475569;
+              }
+              .progress-bar-container {
+                background: rgba(0, 0, 0, 0.05);
+              }
+              .redirect-label {
+                color: #94a3b8;
+              }
             }
           </style>
         </head>

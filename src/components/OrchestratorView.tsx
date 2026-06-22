@@ -21,6 +21,7 @@ const getAgentBadgeText = (route: string) => {
 };
 
 interface OrchestratorViewProps {
+  theme: "light" | "dark";
   orchPayload: string;
   setOrchPayload: (val: string) => void;
   orchEventType: string;
@@ -42,6 +43,7 @@ interface OrchestratorViewProps {
 }
 
 export default function OrchestratorView({
+  theme,
   orchPayload,
   setOrchPayload,
   orchEventType,
@@ -114,44 +116,64 @@ export default function OrchestratorView({
   return (
     <div className="flex flex-col gap-6">
       {/* Breadcrumb row */}
-      <div className="text-[12px] font-mono text-slate-500 tracking-tight flex items-center gap-1">
+      <div className={`text-[12px] font-mono tracking-tight flex items-center gap-1 ${
+        theme === "dark" ? "text-slate-500" : "text-slate-400"
+      }`}>
         <span>codeLore</span>
         <ChevronRight className="h-3 w-3 opacity-60" />
-        <span className="text-slate-400">orchestrator</span>
+        <span className={theme === "dark" ? "text-slate-400" : "text-slate-650"}>orchestrator</span>
         <ChevronRight className="h-3 w-3 opacity-60" />
         <span className="text-purple-400">eventRouting</span>
       </div>
 
       {/* Intro section */}
       <div>
-        <h3 className="text-[16px] font-sans font-medium text-white flex items-center gap-2">
+        <h3 className={`text-[16px] font-sans font-medium flex items-center gap-2 ${
+          theme === "dark" ? "text-white" : "text-slate-800"
+        }`}>
           <Layers className="h-4.5 w-4.5 text-purple-400" />
           <span>Orchestrated event router</span>
         </h3>
-        <p className="text-[12px] text-slate-400 mt-1">
+        <p className={`text-[12px] mt-1 ${
+          theme === "dark" ? "text-slate-400" : "text-slate-600"
+        }`}>
           Evaluate unknown event payloads using direct patterns or large language model intelligence to dispatch specialist agents dynamically.
         </p>
       </div>
 
       {/* GitHub Repository Integration card */}
       {!ghUser ? (
-        <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-4 md:p-5 flex flex-col gap-4">
+        <div className={`rounded-xl p-4 md:p-5 flex flex-col gap-4 border ${
+          theme === "dark" 
+            ? "bg-slate-950/40 border-slate-850" 
+            : "bg-white border-slate-200"
+        }`}>
           <div className="flex items-center justify-between">
-            <h4 className="text-[14px] font-sans font-medium text-slate-300 flex items-center gap-2">
+            <h4 className={`text-[14px] font-sans font-medium flex items-center gap-2 ${
+              theme === "dark" ? "text-slate-300" : "text-slate-850"
+            }`}>
               <Github className="h-4 w-4 text-purple-400" />
               <span>GitHub repository integration</span>
             </h4>
-            <span className="text-[11px] font-mono text-slate-500">Authentication required</span>
+            <span className={`text-[11px] font-mono ${
+              theme === "dark" ? "text-slate-500" : "text-slate-400"
+            }`}>Authentication required</span>
           </div>
 
           <div className="flex flex-col gap-3">
-            <p className="text-[12px] text-slate-400">
+            <p className={`text-[12px] ${
+              theme === "dark" ? "text-slate-400" : "text-slate-600"
+            }`}>
               Connect your GitHub account to access your repositories. Use OAuth or enter a Personal Access Token manually.
             </p>
             <div className="flex flex-col sm:flex-row gap-3">
               <a
                 href="/api/github/login"
-                className="bg-white border border-purple-500/80 hover:bg-purple-50/50 text-purple-700 px-4 py-2.5 rounded-lg font-sans text-[12px] font-medium cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 transition w-full sm:w-auto shadow-sm"
+                className={`px-4 py-2.5 rounded-lg font-sans text-[12px] font-medium cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 transition w-full sm:w-auto shadow-sm border ${
+                  theme === "dark"
+                    ? "bg-slate-900 border-purple-500/80 hover:bg-slate-850 text-purple-300"
+                    : "bg-white border-purple-500/80 hover:bg-purple-50/50 text-purple-700"
+                }`}
               >
                 <Github className="h-3.5 w-3.5 text-purple-600" />
                 <span>Sign in with GitHub OAuth</span>
@@ -163,13 +185,21 @@ export default function OrchestratorView({
                   placeholder="Or enter Personal Access Token..."
                   value={inputToken}
                   onChange={(e) => setInputToken(e.target.value)}
-                  className="flex-1 bg-slate-900 border border-slate-800 rounded-lg text-[12px] font-sans font-normal p-2.5 text-slate-200 outline-none focus:border-purple-500 transition placeholder-slate-600"
+                  className={`flex-1 border rounded-lg text-[12px] font-sans font-normal p-2.5 outline-none focus:border-purple-500 transition ${
+                    theme === "dark"
+                      ? "bg-slate-900 border-slate-800 text-slate-200 placeholder-slate-600"
+                      : "bg-white border-slate-200 text-slate-800 placeholder-slate-400"
+                  }`}
                 />
                 <button
                   type="button"
                   onClick={handleConnect}
                   disabled={loadingGh}
-                  className="bg-white border border-teal-500/80 hover:bg-teal-50/50 text-teal-700 px-4 py-2.5 rounded-lg font-sans text-[12px] font-medium cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 transition disabled:opacity-50 shadow-sm"
+                  className={`px-4 py-2.5 rounded-lg font-sans text-[12px] font-medium cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 transition disabled:opacity-50 shadow-sm border ${
+                    theme === "dark"
+                      ? "bg-slate-900 border-teal-500/80 hover:bg-slate-850 text-teal-300"
+                      : "bg-white border-teal-500/80 hover:bg-teal-50/50 text-teal-700"
+                  }`}
                 >
                   {loadingGh ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-teal-600" />
@@ -186,42 +216,66 @@ export default function OrchestratorView({
           </div>
         </div>
       ) : (
-        <div className="bg-slate-950/40 border border-slate-850 rounded-xl p-4 md:p-5 flex flex-col gap-4">
+        <div className={`rounded-xl p-4 md:p-5 flex flex-col gap-4 border ${
+          theme === "dark" 
+            ? "bg-slate-950/40 border-slate-850" 
+            : "bg-white border-slate-200"
+        }`}>
           <div className="flex items-center justify-between">
-            <h4 className="text-[14px] font-sans font-medium text-slate-300 flex items-center gap-2">
+            <h4 className={`text-[14px] font-sans font-medium flex items-center gap-2 ${
+              theme === "dark" ? "text-slate-300" : "text-slate-850"
+            }`}>
               <Github className="h-4 w-4 text-purple-400" />
               <span>GitHub repository integration</span>
             </h4>
             <button
               type="button"
               onClick={handleDisconnect}
-              className="text-slate-500 hover:text-red-450 transition flex items-center gap-1 text-[11px] font-sans cursor-pointer"
+              className={`transition flex items-center gap-1 text-[11px] font-sans cursor-pointer ${
+                theme === "dark" ? "text-slate-500 hover:text-red-400" : "text-slate-400 hover:text-red-650"
+              }`}
             >
               <LogOut className="h-3.5 w-3.5" />
               <span>Disconnect</span>
             </button>
           </div>
 
-          <div className="flex flex-col md:flex-row items-center md:justify-between gap-4 bg-slate-900/50 border border-slate-850 p-3 rounded-lg">
+          <div className={`flex flex-col md:flex-row items-center md:justify-between gap-4 bg-transparent border p-4.5 rounded-xl transition-all duration-250 ${
+            theme === "dark"
+              ? "border-purple-500/30 shadow-[0_0_15px_rgba(168,85,247,0.05)]"
+              : "border-purple-500/40 shadow-[0_0_15px_rgba(168,85,247,0.03)]"
+          }`}>
             <div className="flex items-center gap-3 w-full md:w-auto">
               <img
                 src={ghUser.avatar_url}
                 alt={ghUser.login}
-                className="w-9 h-9 rounded-full border border-purple-500/20"
+                className={`w-9 h-9 rounded-full border ${
+                  theme === "dark" ? "border-purple-500/30" : "border-purple-500/40"
+                }`}
               />
               <div className="flex flex-col">
-                <span className="text-[12px] font-sans font-medium text-slate-200">@{ghUser.login}</span>
-                <span className="text-[10px] font-mono text-slate-500">authenticated context</span>
+                <span className={`text-[12px] font-sans font-semibold ${
+                  theme === "dark" ? "text-slate-200" : "text-slate-800"
+                }`}>@{ghUser.login}</span>
+                <span className={`text-[10px] font-mono ${
+                  theme === "dark" ? "text-slate-500" : "text-slate-450"
+                }`}>authenticated context</span>
               </div>
             </div>
 
             <div className="flex flex-col gap-1 w-full md:w-[250px]">
-              <label htmlFor="repo-select" className="text-[10px] font-sans font-normal text-slate-400">Target repository</label>
+              <label htmlFor="repo-select" className={`text-[10px] font-sans font-medium ${
+                theme === "dark" ? "text-slate-400" : "text-slate-500"
+              }`}>Target repository</label>
               <select
                 id="repo-select"
                 value={repoName}
                 onChange={(e) => setRepoName(e.target.value)}
-                className="bg-slate-950 border border-slate-800 rounded-lg text-[12px] font-sans font-normal p-2 text-slate-200 outline-none focus:border-purple-500 transition cursor-pointer"
+                className={`border rounded-lg text-[12px] font-sans font-normal p-2.5 outline-none focus:border-purple-500 transition cursor-pointer ${
+                  theme === "dark"
+                    ? "bg-slate-950 border-slate-800 text-slate-200"
+                    : "bg-white border-slate-200 text-slate-850"
+                }`}
               >
                 <option value="" disabled>Select repository...</option>
                 {ghRepos.map((repo) => (
@@ -233,9 +287,11 @@ export default function OrchestratorView({
             </div>
           </div>
 
-          <div className="text-[11px] font-mono text-slate-500 pl-1 flex items-center gap-1.5">
+          <div className={`text-[11px] font-mono pl-1 flex items-center gap-1.5 ${
+            theme === "dark" ? "text-slate-500" : "text-slate-450"
+          }`}>
             <FolderGit className="h-3.5 w-3.5 text-teal-400" />
-            <span>Active context: <strong className="text-slate-300">{repoName || "None selected"}</strong></span>
+            <span>Active context: <strong className={theme === "dark" ? "text-slate-300" : "text-slate-700"}>{repoName || "None selected"}</strong></span>
           </div>
         </div>
       )}
@@ -243,14 +299,22 @@ export default function OrchestratorView({
       {/* Live Routing Timeline */}
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
-          <h4 className="text-[14px] font-sans font-medium text-slate-300">
+          <h4 className={`text-[14px] font-sans font-medium ${
+            theme === "dark" ? "text-slate-300" : "text-slate-700"
+          }`}>
             Routing timeline
           </h4>
-          <span className="text-[12px] font-mono text-slate-500">Autonomous loop active</span>
+          <span className={`text-[12px] font-mono ${
+            theme === "dark" ? "text-slate-500" : "text-slate-400"
+          }`}>Autonomous loop active</span>
         </div>
 
         {routingEvents.length === 0 ? (
-          <div className="border border-slate-850 border-dashed rounded-lg p-8 text-center text-[12px] font-sans font-normal text-slate-500">
+          <div className={`border border-dashed rounded-lg p-8 text-center text-[12px] font-sans font-normal ${
+            theme === "dark"
+              ? "border-slate-850 text-slate-500"
+              : "border-slate-200 text-slate-450 bg-slate-50/50"
+          }`}>
             No events routed yet. CodeLore is listening.
           </div>
         ) : (
@@ -272,14 +336,20 @@ export default function OrchestratorView({
                       ev.failed 
                         ? "border-red-500/20 bg-red-500/5 hover:bg-red-500/10" 
                         : isExpanded 
-                          ? "border-slate-700 bg-slate-900/60" 
-                          : "border-slate-850 bg-slate-950/20 hover:bg-slate-900/40"
+                          ? theme === "dark"
+                            ? "border-slate-700 bg-slate-900/60" 
+                            : "border-slate-300 bg-slate-100/50"
+                          : theme === "dark"
+                            ? "border-slate-850 bg-slate-950/20 hover:bg-slate-900/40"
+                            : "border-slate-200 bg-white hover:bg-slate-50"
                     }`}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-3 text-[12px]">
                       <div className="flex items-center gap-3">
                         <span className="font-mono text-slate-500">{ev.timestamp}</span>
-                        <span className="font-mono bg-slate-850 px-2 py-0.5 rounded text-slate-400 capitalize">
+                        <span className={`font-mono px-2 py-0.5 rounded text-[11px] ${
+                          theme === "dark" ? "bg-slate-850 text-slate-400" : "bg-slate-105 text-slate-600"
+                        } capitalize`}>
                           {ev.eventType}
                         </span>
                         
@@ -308,11 +378,15 @@ export default function OrchestratorView({
                       </div>
                     </div>
 
-                    <div className="mt-2 text-[12px] text-slate-300 font-sans font-normal truncate pl-1">
+                    <div className={`mt-2 text-[12px] font-sans font-normal truncate pl-1 ${
+                      theme === "dark" ? "text-slate-300" : "text-slate-700"
+                    }`}>
                       {ev.payload}
                     </div>
 
-                    <div className="mt-1.5 text-[11px] text-slate-500 font-mono tracking-tight pl-1 flex items-center gap-1.5">
+                    <div className={`mt-1.5 text-[11px] font-mono tracking-tight pl-1 flex items-center gap-1.5 ${
+                      theme === "dark" ? "text-slate-500" : "text-slate-450"
+                    }`}>
                       <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
                       <span>{ev.outcome}</span>
                       {ev.failed && (
@@ -325,13 +399,19 @@ export default function OrchestratorView({
                     {/* Expanded JSON details */}
                     {isExpanded && (
                       <div 
-                        className="mt-3 pt-3 border-t border-slate-900"
+                        className={`mt-3 pt-3 border-t ${
+                          theme === "dark" ? "border-slate-900" : "border-slate-200"
+                        }`}
                         onClick={(e) => e.stopPropagation()}
                       >
                         <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest block mb-1">
                           Standard output payload contract
                         </span>
-                        <pre className="bg-slate-905 border border-slate-900 p-2.5 rounded text-[11px] font-mono text-slate-300 overflow-x-auto whitespace-pre leading-relaxed">
+                        <pre className={`border p-2.5 rounded text-[11px] font-mono overflow-x-auto whitespace-pre leading-relaxed ${
+                          theme === "dark"
+                            ? "bg-slate-950 border-slate-900 text-slate-300"
+                            : "bg-slate-50 border-slate-200 text-slate-750"
+                        }`}>
                           {JSON.stringify(
                             {
                               id: ev.id,
