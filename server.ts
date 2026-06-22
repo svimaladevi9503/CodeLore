@@ -1371,7 +1371,7 @@ async function performWebhook(params: { commitHistory?: string; payload?: string
   if (ai) {
     try {
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.0-flash",
         contents: `You are CodeLore's Documentation Helper Agent. Analyze the file changes described in the Git commit/diff logs, and intelligently rewrite the project's README.md file so that any new modules, installation steps, features, or configurations are updated accurately.
 Keep the overall layout pristine.
 
@@ -1804,7 +1804,7 @@ app.post("/api/readme/modify", async (req, res) => {
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.0-flash",
       contents: `You are a professional documentation editor. Modify the following README markdown content based on the user's instructions.
       
 Current README:
@@ -2018,7 +2018,7 @@ async function performRagQuery(params: { query?: string; payload?: string }) {
     if (ai) {
       try {
         const response = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
+          model: "gemini-2.0-flash",
           contents: `You are the Knowledge Base Agent. Answer the user's technical question based EXACTLY on the relevant documentation chunks. Give a concise but highly professional response. Cite your sources clearly.
  
  Relevant documentation context:
@@ -2492,7 +2492,7 @@ End answers with: › Source: {filename} {header}`;
     userPromptContent += `Context chunks:\n${contextStr}\n\nQuestion: ${query}`;
 
     const streamPromise = ai.models.generateContentStream({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.0-flash",
       contents: userPromptContent,
       config: {
         systemInstruction: systemPrompt
@@ -2622,7 +2622,7 @@ async function classifyIntentWithLLM(payload: string): Promise<{ route: string; 
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.0-flash",
       contents: `You are CodeLore's generalist Orchestrator. Classify this event payload to one of the target specialists: "DOCUMENTATION HELPER", "KNOWLEDGE BASE AGENT", or "CLEANER AGENT".
 Payload: "${payload}"
 
