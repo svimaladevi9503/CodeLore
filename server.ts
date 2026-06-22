@@ -1763,6 +1763,103 @@ function getRepositoryContext(dir: string): { fileTree: string; fileContents: st
   return { fileTree, fileContents };
 }
 
+function listLocalRepoFiles(dir: string): string[] {
+  const files: string[] = [];
+
+  const walk = (currentDir: string) => {
+    const list = fs.readdirSync(currentDir);
+    for (const item of list) {
+      const fullPath = path.join(currentDir, item);
+      const relPath = path.relative(dir, fullPath);
+
+      if (
+        relPath.startsWith(".git") ||
+        relPath.includes("node_modules") ||
+        relPath.includes(".venv") ||
+        relPath.includes("dist") ||
+        relPath.includes("build") ||
+        relPath.includes("tmp")
+      ) {
+        continue;
+      }
+
+      const stat = fs.statSync(fullPath);
+      if (stat.isDirectory()) {
+        walk(fullPath);
+        continue;
+      }
+
+      const ext = path.extname(item).toLowerCase();
+      if (TEXT_EXTENSIONS.has(ext) && stat.size < 40000) {
+        files.push(relPath);
+      }
+    }
+  };
+
+  walk(dir);
+  return files;
+}
+
+function buildLiveRepoQueryContext(query: string): {
+  repoTree: string;
+  sources: Array<{ filename: string; section: string; source_url: string; relevance: number }>;
+  contextText: string;
+} {
+  const repoRoot = process.cwd();
+  const allFiles = listLocalRepoFiles(repoRoot);
+  const prioritizedByIntent = (() => {
+    const q = query.toLowerCase();
+    if (q.includes("tech stack") || q.includes("stack") || q.includes("framework") || q.includes("built with")) {
+      return ["package.json", "server.ts", "src/App.tsx", "vite.config.ts", "tsconfig.json", "Dockerfile", "README.md"];
+    }
+    if (q.includes("what is this repo") || q.includes("repo about") || q.includes("overview")) {
+      return ["README.md", "package.json", "server.ts", "src/App.tsx"];
+    }
+    return ["README.md", "package.json", "server.ts", "src/App.tsx", "src/components/KnowledgeBaseView.tsx"];
+  })();
+
+  const scoredFiles = allFiles.map((relPath) => {
+    const absPath = path.join(repoRoot, relPath);
+    let content = "";
+    try {
+      content = fs.readFileSync(absPath, "utf-8");
+    } catch {
+      content = "";
+    }
+
+    const nameBoost = prioritizedByIntent.includes(relPath) ? 0.8 : 0;
+    const score = computeTokenOverlap(query, `${relPath} ${content}`) + nameBoost;
+    return { relPath, content, score };
+  });
+
+  scoredFiles.sort((a, b) => b.score - a.score);
+  const topFiles = scoredFiles.slice(0, 6).filter((item, idx) => item.score > 0.01 || idx < 4);
+  const owner = getGitOwner();
+  const repoContext = parcleDb.metadata?.["orchestrator:active_repo_context"] || {};
+  const repo = repoContext.active_repo || "CodeLore";
+  const branch = repoContext.active_branch || "main";
+
+  const sources = topFiles.map((file) => ({
+    filename: file.relPath,
+    section: "Live repo context",
+    source_url: `https://github.com/${owner}/${repo}/blob/${branch}/${file.relPath}`,
+    relevance: Number(file.score.toFixed(2))
+  }));
+
+  const contextText = topFiles
+    .map((file) => {
+      const trimmed = file.content.slice(0, 5000);
+      return `--- File: ${file.relPath} ---\n${trimmed}`;
+    })
+    .join("\n\n");
+
+  return {
+    repoTree: allFiles.slice(0, 120).join("\n"),
+    sources,
+    contextText
+  };
+}
+
 // Run local readme-ai command on cloned remote repository code and post-process with Groq
 app.post("/api/readme/generate", async (req, res) => {
   const { token, repo, repoName, align, badgeStyle, headerStyle, navigationStyle, emojis } = req.body;
@@ -2355,7 +2452,7 @@ app.post("/api/kb/ingest", async (req, res) => {
   }
 });
 
-// Streaming Q&A retrieval (Parcle -> Answer)
+// Streaming Q&A over live local repo files
 app.post("/api/kb/query", async (req, res) => {
   const { query, session_id } = req.body;
   if (!query) {
@@ -2369,15 +2466,9 @@ app.post("/api/kb/query", async (req, res) => {
   const repoContext = parcleDb.metadata?.["orchestrator:active_repo_context"] || {};
   const repo_name = repoContext.active_repo || "custom-docs";
 
-  let chunk_count = 0;
-  let top_3_filenames_from_manifest = "";
-  const manifest = parcleDb.metadata?.["kb:index:manifest"] || [];
-  const manifestFiles = Array.isArray(manifest) ? manifest : (manifest.files || []);
-  chunk_count = manifestFiles.reduce((acc: number, entry: any) => acc + (entry.chunk_count || 0), 0);
-  top_3_filenames_from_manifest = manifestFiles.slice(0, 3).map((e: any) => e.filename).join(", ");
-  if (!top_3_filenames_from_manifest) {
-    top_3_filenames_from_manifest = "README.md, agents.md, parcle_memory_api.md";
-  }
+  const liveFiles = listLocalRepoFiles(process.cwd());
+  const top_3_filenames_from_manifest = liveFiles.slice(0, 3).join(", ") || "README.md, package.json, server.ts";
+  const chunk_count = liveFiles.length;
 
   // --- INTENT CLASSIFIER ---
   const normalizedQuery = query.trim().toLowerCase();
@@ -2418,101 +2509,13 @@ app.post("/api/kb/query", async (req, res) => {
   }
 
   if (identity.includes(normalizedQuery)) {
-    return streamImmediateResponse(`I'm CodeLore's RAG specialist. I have ${chunk_count} indexed chunks from ${repo_name} in Parcle memory. Ask me about any file, function, or flow in the repo.`);
+    return streamImmediateResponse(`I'm CodeLore's repo assistant. I can answer from ${chunk_count} live files in ${repo_name} using your configured model API key. Ask me about architecture, stack, or specific files.`);
   }
 
   try {
-    let queryEmbedding: number[] = [];
-    try {
-      queryEmbedding = await generateEmbeddingVec(query);
-    } catch (e) {
-      console.error("Failed to generate query embedding", e);
-    }
-
-    const kbChunks: Array<{ key: string; text: string; header: string; filename: string; embedding: number[]; source_url: string }> = [];
-    if (parcleDb.metadata) {
-      for (const [key, val] of Object.entries(parcleDb.metadata)) {
-        if (key.startsWith("kb:") && key !== "kb:index:manifest" && !key.endsWith(":prev")) {
-          const chunkVal = val as any;
-          if (chunkVal && chunkVal.text) {
-            kbChunks.push({
-              key,
-              text: chunkVal.text,
-              header: chunkVal.header || "",
-              filename: chunkVal.filename || "",
-              embedding: chunkVal.embedding || [],
-              source_url: chunkVal.source_url || ""
-            });
-          }
-        }
-      }
-    }
-
-    if (kbChunks.length === 0) {
-      let suggested = "README.md";
-      if (manifestFiles.length > 0) {
-        suggested = manifestFiles[0].filename;
-      }
-      const emptyMsg = JSON.stringify({
-        error: "no_results",
-        message: `I don't have that in my knowledge base yet. Try adding ${suggested} to get that answer.`,
-        suggested_filename: suggested
-      });
-      res.write(`data: ${emptyMsg}\n\n`);
-      res.write(`data: [DONE]\n\n`);
-      res.end();
-      return;
-    }
-
-    const scoredChunks = kbChunks.map(chunk => {
-      let score = 0;
-      if (queryEmbedding.length > 0 && chunk.embedding && chunk.embedding.length > 0) {
-        score = cosineSimilarity(queryEmbedding, chunk.embedding);
-      } else {
-        score = computeTokenOverlap(query, `${chunk.header} ${chunk.text}`);
-      }
-      return { chunk, score };
-    });
-
-    scoredChunks.sort((a, b) => b.score - a.score);
-    const topChunks = scoredChunks.slice(0, 3).filter(x => x.score > 0.01);
-
-    if (topChunks.length === 0) {
-      let suggested = "README.md";
-      if (manifestFiles.length > 0) {
-        suggested = manifestFiles[0].filename;
-      }
-      const emptyMsg = JSON.stringify({
-        error: "no_results",
-        message: `I don't have that in my knowledge base yet. Try adding ${suggested} to get that answer.`,
-        suggested_filename: suggested
-      });
-      res.write(`data: ${emptyMsg}\n\n`);
-      res.write(`data: [DONE]\n\n`);
-      res.end();
-      return;
-    }
-
-    const sources = topChunks.map(x => ({
-      filename: x.chunk.filename,
-      section: x.chunk.header,
-      source_url: x.chunk.source_url,
-      relevance: Number(x.score.toFixed(2))
-    }));
+    const liveContext = buildLiveRepoQueryContext(query);
+    const sources = liveContext.sources;
     res.write(`data: ${JSON.stringify({ sources })}\n\n`);
-
-    let contextStr = "";
-    let tokenCount = 0;
-    for (const scored of topChunks) {
-      const chunkText = `[Source: ${scored.chunk.filename} › ${scored.chunk.header}]\n${scored.chunk.text}\n\n`;
-      const chunkTokens = chunkText.split(/\s+/).filter(Boolean).length;
-      if (tokenCount + chunkTokens <= 900) {
-        contextStr += chunkText;
-        tokenCount += chunkTokens;
-      } else {
-        break;
-      }
-    }
 
     // Fetch conversation history
     let last3Turns: any[] = [];
@@ -2522,34 +2525,10 @@ app.post("/api/kb/query", async (req, res) => {
       last3Turns = history.slice(-3);
     }
 
-    const ai = getAI();
-    let suggested_file = "README.md";
-    if (manifestFiles.length > 0) {
-      const matched = manifestFiles.find((f: any) => query.toLowerCase().includes(f.filename.toLowerCase()));
-      suggested_file = matched ? matched.filename : manifestFiles[0].filename;
-    }
-
     await appendHistory("user", query);
 
     let finalAnswer = "";
-    if (!ai) {
-      finalAnswer = buildKnowledgeBaseFallbackAnswer(topChunks);
-      
-      const words = finalAnswer.split(" ");
-      for (const word of words) {
-        res.write(`data: ${JSON.stringify({ token: word + " " })}\n\n`);
-        await new Promise(resolve => setTimeout(resolve, 80));
-      }
-      await appendHistory("assistant", finalAnswer, sources);
-      res.write(`data: [DONE]\n\n`);
-      res.end();
-      return;
-    }
-
-    const systemPrompt = `You are CodeLore, an intelligent codebase assistant for the repo ${repo_name}. Answer using ONLY the context chunks provided. Be concise (2-3 sentences). If the answer isn't in context, say exactly:
-'I don't have that in my knowledge base yet. Try adding ${suggested_file} to get that answer.'
-Never say 'No matching knowledge found.' — always suggest a next action instead.
-End answers with: › Source: {filename} {header}`;
+    const systemPrompt = `You are CodeLore, an intelligent codebase assistant for the repo ${repo_name}. Answer from the live repository context provided. Be concise, accurate, and specific. Prefer concrete stack names, file names, and commands when relevant. End answers with a short source line in this format: › Source: {filename1}, {filename2}`;
 
     let userPromptContent = "";
     if (last3Turns.length > 0) {
@@ -2559,60 +2538,42 @@ End answers with: › Source: {filename} {header}`;
       }
       userPromptContent += "\n";
     }
-    userPromptContent += `Context chunks:\n${contextStr}\n\nQuestion: ${query}`;
-
-    const streamPromise = ai.models.generateContentStream({
-      model: "gemini-2.0-flash",
-      contents: userPromptContent,
-      config: {
-        systemInstruction: systemPrompt
-      }
-    });
-
-    let completed = false;
-    const timeoutId = setTimeout(() => {
-      if (!completed) {
-        res.write(`data: ${JSON.stringify({ token: " [Answer truncated — ask for more detail]" })}\n\n`);
-        res.write(`data: [DONE]\n\n`);
-        res.end();
-        completed = true;
-      }
-    }, 5000);
+    userPromptContent += `Repository file tree:\n${liveContext.repoTree}\n\nRepository context:\n${liveContext.contextText}\n\nQuestion: ${query}`;
 
     try {
-      const responseStream = await streamPromise;
-      for await (const chunk of responseStream) {
-        if (completed) break;
-        const text = chunk.text;
-        if (text) {
-          finalAnswer += text;
-          res.write(`data: ${JSON.stringify({ token: text })}\n\n`);
+      if (getGroq()) {
+        finalAnswer = await generateGroqText({
+          system: systemPrompt,
+          user: userPromptContent,
+          temperature: 0.2
+        });
+      } else {
+        const ai = getAI();
+        if (!ai) {
+          throw new Error("No AI client initialized");
         }
+        const response = await ai.models.generateContent({
+          model: "gemini-2.0-flash",
+          contents: userPromptContent,
+          config: {
+            systemInstruction: systemPrompt
+          }
+        });
+        finalAnswer = response.text || "";
       }
-      if (!completed) {
-        clearTimeout(timeoutId);
-        await appendHistory("assistant", finalAnswer, sources);
-        res.write(`data: [DONE]\n\n`);
-        res.end();
-        completed = true;
-      }
-    } catch (streamErr: any) {
-      console.error("Stream failed", streamErr);
-      if (!completed) {
-        clearTimeout(timeoutId);
-        const fallbackAnswer = buildKnowledgeBaseFallbackAnswer(topChunks);
-        const friendlyError = getGeminiFriendlyError(streamErr);
-        finalAnswer = `${friendlyError}\n\n${fallbackAnswer}`;
-        const words = finalAnswer.split(" ");
-        for (const word of words) {
-          res.write(`data: ${JSON.stringify({ token: word + " " })}\n\n`);
-        }
-        await appendHistory("assistant", finalAnswer, sources);
-        res.write(`data: [DONE]\n\n`);
-        res.end();
-        completed = true;
-      }
+    } catch (modelErr: any) {
+      console.error("Direct repo answer failed", modelErr);
+      const sourceList = sources.slice(0, 2).map(src => src.filename).join(", ") || "README.md, package.json";
+      finalAnswer = `${getGeminiFriendlyError(modelErr)}\n\nI can answer from live repo files once a working AI provider is available.\n\n› Source: ${sourceList}`;
     }
+
+    const words = finalAnswer.split(" ");
+    for (const word of words) {
+      res.write(`data: ${JSON.stringify({ token: word + " " })}\n\n`);
+    }
+    await appendHistory("assistant", finalAnswer, sources);
+    res.write(`data: [DONE]\n\n`);
+    res.end();
 
   } catch (err: any) {
     console.error("Query stream endpoint failed", err);
