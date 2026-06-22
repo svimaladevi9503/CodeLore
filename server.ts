@@ -2861,7 +2861,7 @@ app.get("/api/github/login", (req, res) => {
   }
   const appUrl = process.env.APP_URL || `http://localhost:${PORT}`;
   const redirectUri = `${appUrl}/api/github/callback`;
-  const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=repo,user`;
+  const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=repo%20user`;
   res.redirect(githubAuthUrl);
 });
 
