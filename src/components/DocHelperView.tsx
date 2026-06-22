@@ -109,6 +109,107 @@ function CustomDropdown({ label, options, value, onChange, theme }: CustomDropdo
   );
 }
 
+function parseMarkdown(md: string) {
+  const lines = md.split("\n");
+  let inCodeBlock = false;
+  let codeContent: string[] = [];
+
+  return lines.map((line, idx) => {
+    if (line.trim().startsWith("```")) {
+      if (inCodeBlock) {
+        inCodeBlock = false;
+        const code = codeContent.join("\n");
+        codeContent = [];
+        return (
+          <pre key={idx} className="bg-slate-900 border border-slate-800 p-3 rounded-lg my-2 font-mono text-[11px] overflow-x-auto text-slate-300">
+            <code>{code}</code>
+          </pre>
+        );
+      } else {
+        inCodeBlock = true;
+        return null;
+      }
+    }
+
+    if (inCodeBlock) {
+      codeContent.push(line);
+      return null;
+    }
+
+    if (line.startsWith("# ")) {
+      return <h1 key={idx} className="text-xl font-bold border-b border-slate-800 pb-1 mt-4 mb-2 text-white">{parseInline(line.substring(2))}</h1>;
+    }
+    if (line.startsWith("## ")) {
+      return <h2 key={idx} className="text-lg font-bold mt-4 mb-2 text-slate-100">{parseInline(line.substring(3))}</h2>;
+    }
+    if (line.startsWith("### ")) {
+      return <h3 key={idx} className="text-md font-semibold mt-3 mb-1 text-slate-200">{parseInline(line.substring(4))}</h3>;
+    }
+    if (line.startsWith("#### ")) {
+      return <h4 key={idx} className="text-[13px] font-semibold mt-3 mb-1 text-slate-300">{parseInline(line.substring(5))}</h4>;
+    }
+
+    if (line.trim() === "---" || line.trim() === "***" || line.trim() === "___") {
+      return <hr key={idx} className="border-slate-800 my-4" />;
+    }
+
+    if (line.trim().startsWith("- ") || line.trim().startsWith("* ")) {
+      return (
+        <li key={idx} className="ml-4 list-disc text-slate-350 my-0.5">
+          {parseInline(line.trim().substring(2))}
+        </li>
+      );
+    }
+    if (/^\d+\.\s/.test(line.trim())) {
+      const match = line.trim().match(/^(\d+)\.\s(.*)/);
+      if (match) {
+        return (
+          <li key={idx} className="ml-4 list-decimal text-slate-350 my-0.5">
+            {parseInline(match[2])}
+          </li>
+        );
+      }
+    }
+
+    if (!line.trim()) {
+      return <div key={idx} className="h-2" />;
+    }
+
+    return <p key={idx} className="text-slate-350 my-1">{parseInline(line)}</p>;
+  });
+}
+
+function parseInline(text: string): React.ReactNode {
+  const regex = /(!\[.*?\]\(.*?\)|\[.*?\]\(.*?\)|`.*?`|\*\*.*?\*\*)/g;
+  const tokens = text.split(regex);
+
+  return tokens.map((token, i) => {
+    if (token.startsWith("![") && token.endsWith(")")) {
+      const imgMatch = token.match(/!\[(.*?)\]\((.*?)\)/);
+      if (imgMatch) {
+        return <img key={i} src={imgMatch[2]} alt={imgMatch[1]} className="inline-block my-0.5 mr-1 max-h-6" />;
+      }
+    }
+    if (token.startsWith("[") && token.endsWith(")")) {
+      const linkMatch = token.match(/\[(.*?)\]\((.*?)\)/);
+      if (linkMatch) {
+        return (
+          <a key={i} href={linkMatch[2]} target="_blank" rel="noopener noreferrer" className="text-teal-400 hover:underline">
+            {linkMatch[1]}
+          </a>
+        );
+      }
+    }
+    if (token.startsWith("`") && token.endsWith("`")) {
+      return <code key={i} className="bg-slate-900 text-teal-350 px-1 py-0.5 rounded font-mono text-[10.5px]">{token.slice(1, -1)}</code>;
+    }
+    if (token.startsWith("**") && token.endsWith("**")) {
+      return <strong key={i} className="font-bold text-white">{token.slice(2, -2)}</strong>;
+    }
+    return token;
+  });
+}
+
 interface DocHelperViewProps {
   theme: "light" | "dark";
   repoName: string;
@@ -199,6 +300,9 @@ export default function DocHelperView({
     { sender: "gemini", text: "I can modify your draft README. Ask me to add sections, change instructions, or reformat text." }
   ]);
 
+  const [showSettings, setShowSettings] = useState(false);
+  const [previewMode, setPreviewMode] = useState<"code" | "preview">("code");
+
   // Load GitHub context
   useEffect(() => {
     if (!token) return;
@@ -245,11 +349,13 @@ export default function DocHelperView({
         setReadmeContent(data.content);
         setDraftContent(data.content);
         setReadmeSha(data.sha);
+        setShowSettings(false);
       } else {
         setReadmeExists(false);
         setReadmeContent("");
         setDraftContent("");
         setReadmeSha("");
+        setShowSettings(true);
       }
     } catch (err: any) {
       setReadmeError(err.message || "Failed to parse repository README");
@@ -468,25 +574,39 @@ export default function DocHelperView({
                       <Check className="h-4 w-4 text-emerald-500" />
                       README.md exists on GitHub
                     </span>
-                    <button
-                      type="button"
-                      onClick={handleDeleteReadme}
-                      disabled={deleting}
-                      className={`p-1.5 rounded transition flex items-center gap-1 text-[11px] font-mono cursor-pointer ${
-                        theme === "dark" ? "text-slate-500 hover:text-red-400 hover:bg-slate-900 border border-slate-800" : "text-slate-450 hover:text-red-650 hover:bg-slate-50 border border-slate-200"
-                      }`}
-                    >
-                      {deleting ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-3.5 w-3.5" />
-                      )}
-                      <span>Delete File</span>
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setShowSettings(prev => !prev)}
+                        className={`p-1.5 rounded transition flex items-center gap-1 text-[11px] font-mono cursor-pointer ${
+                          theme === "dark" ? "text-slate-450 hover:text-teal-400 hover:bg-slate-900 border border-slate-800" : "text-slate-450 hover:text-teal-650 hover:bg-slate-50 border border-slate-200"
+                        }`}
+                      >
+                        <Settings className="h-3.5 w-3.5" />
+                        <span>{showSettings ? "Hide Settings" : "Configure & Regenerate"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDeleteReadme}
+                        disabled={deleting}
+                        className={`p-1.5 rounded transition flex items-center gap-1 text-[11px] font-mono cursor-pointer ${
+                          theme === "dark" ? "text-slate-500 hover:text-red-400 hover:bg-slate-900 border border-slate-800" : "text-slate-450 hover:text-red-650 hover:bg-slate-50 border border-slate-200"
+                        }`}
+                      >
+                        {deleting ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3.5 w-3.5" />
+                        )}
+                        <span>Delete File</span>
+                      </button>
+                    </div>
                   </div>
-                  <p className={`text-[11px] leading-relaxed ${theme === "dark" ? "text-slate-500" : "text-slate-450"}`}>
-                    To update this README, configure the styles below and click "Regenerate". The tool will keep tracking this file's version key.
-                  </p>
+                  {showSettings && (
+                    <p className={`text-[11px] leading-relaxed ${theme === "dark" ? "text-slate-500" : "text-slate-450"}`}>
+                      To update this README, configure the styles below and click "Regenerate". The tool will keep tracking this file's version key.
+                    </p>
+                  )}
                 </div>
               ) : readmeExists === false ? (
                 <div className={`border p-3.5 rounded-lg flex flex-col gap-1 bg-transparent ${
@@ -506,17 +626,18 @@ export default function DocHelperView({
             </div>
 
             {/* Readme-AI Customization panel */}
-            <div className={`rounded-xl p-4 md:p-5 border flex flex-col gap-4 ${
-              theme === "dark" ? "bg-slate-950/40 border-slate-850" : "bg-white border-slate-200"
-            }`}>
-              <h4 className={`text-[13px] font-mono uppercase tracking-wider flex items-center gap-2 ${
-                theme === "dark" ? "text-slate-400" : "text-slate-500"
+            {showSettings && (
+              <div className={`rounded-xl p-4 md:p-5 border flex flex-col gap-4 ${
+                theme === "dark" ? "bg-slate-950/40 border-slate-850" : "bg-white border-slate-200"
               }`}>
-                <Settings className="h-4 w-4 text-teal-400 animate-pulse" />
-                <span>Readme-AI Settings</span>
-              </h4>
+                <h4 className={`text-[13px] font-mono uppercase tracking-wider flex items-center gap-2 ${
+                  theme === "dark" ? "text-slate-400" : "text-slate-500"
+                }`}>
+                  <Settings className="h-4 w-4 text-teal-400 animate-pulse" />
+                  <span>Readme-AI Settings</span>
+                </h4>
 
-              <div className="flex flex-col gap-4 font-sans">
+                <div className="flex flex-col gap-4 font-sans">
                 
                 {/* Header Style Selector */}
                 <CustomDropdown
@@ -589,6 +710,7 @@ export default function DocHelperView({
 
               </div>
             </div>
+          )}
 
           </div>
 
@@ -607,16 +729,48 @@ export default function DocHelperView({
                       <Eye className="h-4 w-4 text-teal-400" />
                       <span>README Draft Preview</span>
                     </h4>
+                    <div className={`flex rounded-lg p-0.5 border text-[11px] font-mono ${
+                      theme === "dark" ? "bg-slate-950 border-slate-850" : "bg-slate-550/10 border-slate-200"
+                    }`}>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewMode("code")}
+                        className={`px-2 py-1 rounded cursor-pointer transition ${
+                          previewMode === "code"
+                            ? theme === "dark" ? "bg-teal-500/10 text-teal-400 font-medium" : "bg-white text-teal-700 font-semibold shadow-sm"
+                            : theme === "dark" ? "text-slate-500 hover:text-slate-350" : "text-slate-450 hover:text-slate-700"
+                        }`}
+                      >
+                        Code
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPreviewMode("preview")}
+                        className={`px-2 py-1 rounded cursor-pointer transition ${
+                          previewMode === "preview"
+                            ? theme === "dark" ? "bg-teal-500/10 text-teal-400 font-medium" : "bg-white text-teal-700 font-semibold shadow-sm"
+                            : theme === "dark" ? "text-slate-500 hover:text-slate-350" : "text-slate-450 hover:text-slate-700"
+                        }`}
+                      >
+                        Preview
+                      </button>
+                    </div>
                   </div>
 
-                  <div className={`p-4 rounded-xl border prose prose-invert overflow-y-auto max-h-[460px] h-full min-h-[300px] select-text text-[12px] leading-relaxed ${
+                  <div className={`p-4 rounded-xl border prose prose-invert overflow-y-auto max-h-[460px] h-full min-h-[300px] select-text text-[12.5px] leading-relaxed ${
                     theme === "dark"
                       ? "bg-slate-950/20 border-slate-850 text-slate-300"
                       : "bg-slate-50/40 border-slate-200 text-slate-800"
                   }`}>
-                    <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-350 select-text">
-                      {draftContent}
-                    </pre>
+                    {previewMode === "code" ? (
+                      <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-350 select-text">
+                        {draftContent}
+                      </pre>
+                    ) : (
+                      <div className="space-y-3 font-sans select-text">
+                        {parseMarkdown(draftContent)}
+                      </div>
+                    )}
                   </div>
                 </div>
 
