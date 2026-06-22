@@ -17,6 +17,8 @@ export function useCleanerState(repoName: string) {
   const [sortBy, setSortBy] = useState<"file" | "severity" | "category">("severity");
   const [scanProgress, setScanProgress] = useState<{ current: string; done: number; total: number } | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [fixError, setFixError] = useState<string | null>(null);
 
   const [showCodeViewer, setShowCodeViewer] = useState(false);
   const [highlightLines, setHighlightLines] = useState<{ start: number; end: number } | null>(null);
@@ -172,6 +174,7 @@ export function useCleanerState(repoName: string) {
       }
     } catch (err) {
       console.error("Apply fix error:", err);
+      setFixError("Failed to apply fix patch. Please try again.");
     } finally {
       setApplyingFix(false);
     }
@@ -188,16 +191,20 @@ export function useCleanerState(repoName: string) {
     if (sourceFiles.length === 0) return;
 
     setScanning(true);
+    setScanError(null);
     setIssues([]);
     setShowCodeViewer(false);
     setScanProgress({ current: "Preparing...", done: 0, total: sourceFiles.length });
 
+    // Fix #11: simulate progress so bar isn't frozen at 0 during the API wait
+    let simDone = 0;
+    const files = sourceFiles.map(f => ({ path: f.path, sha: f.sha }));
+    const progressInterval = setInterval(() => {
+      simDone = Math.min(simDone + 1, Math.floor(files.length * 0.9));
+      setScanProgress({ current: `Analyzing ${files.length} files...`, done: simDone, total: files.length });
+    }, 600);
+
     try {
-      const files = sourceFiles.map(f => ({ path: f.path, sha: f.sha }));
-
-      // We send all files at once to the server (which handles concurrency)
-      setScanProgress({ current: `Analyzing ${files.length} files...`, done: 0, total: files.length });
-
       const res = await fetch("/api/cleaner/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -211,7 +218,9 @@ export function useCleanerState(repoName: string) {
       }
     } catch (err) {
       console.error("Scan error:", err);
+      setScanError("Scan failed. Check your connection and try again.");
     } finally {
+      clearInterval(progressInterval);
       setScanning(false);
       setTimeout(() => setScanProgress(null), 2000);
     }
@@ -252,6 +261,7 @@ export function useCleanerState(repoName: string) {
   return {
     treeData, treeLoading, totalCount, ignoredCount, expandedDirs, selectedFile,
     fileContent, fileLoading, issues, filterSeverity, sortBy, scanProgress, scanning,
+    scanError, setScanError, fixError, setFixError,
     showCodeViewer, highlightLines, fixPreview, applyingFix, patchLog,
     nestedTree, filteredIssues, errorCount, warningCount, suggestionCount, resolvedCount, codeLines,
     setFilterSeverity, setSortBy, setShowCodeViewer, setHighlightLines, setFixPreview,

@@ -30,7 +30,7 @@ const KnowledgeBaseHeader = ({
       {/* Info title section */}
       <div className="shrink-0 flex items-center justify-between gap-4">
         <div>
-          <h3 className="text-[16px] font-sans font-medium text-white flex items-center gap-2">
+          <h3 className={`text-[16px] font-sans font-medium flex items-center gap-2 ${theme === "dark" ? "text-white" : "text-slate-800"}`}>
             <Search className="h-4.5 w-4.5 text-blue-400" />
             <span>RAG knowledge base specialist</span>
           </h3>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 
 export function useKnowledgeBase(repoName: string, fetchDiagnostics: () => Promise<void>) {
   const [repoContext, setRepoContext] = useState<{
@@ -14,6 +14,18 @@ export function useKnowledgeBase(repoName: string, fetchDiagnostics: () => Promi
   const [ingestionState, setIngestionState] = useState<"idle" | "fetching" | "chunking" | "indexed" | "error">("idle");
   const [ingestError, setIngestError] = useState<string | null>(null);
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
+
+  // Refs to track timers so they can be cleaned up on unmount
+  const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const retryTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cancel any in-flight timers when the component unmounts
+  useEffect(() => {
+    return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      if (retryTimerRef.current) clearInterval(retryTimerRef.current);
+    };
+  }, []);
 
   const fetchRepoContext = async (isPoll = false) => {
     if (!isPoll) setIsSyncing(true);
@@ -31,14 +43,12 @@ export function useKnowledgeBase(repoName: string, fetchDiagnostics: () => Promi
   };
 
   useEffect(() => {
+    // Single fetch on mount — App.tsx owns the 5s repo-switch polling loop
     fetchRepoContext(false);
-    const interval = setInterval(() => fetchRepoContext(true), 3000);
-    
+
     // Sync pending sync items
     const syncList = JSON.parse(localStorage.getItem("kb_pending_sync") || "[]");
     setPendingSyncCount(syncList.length);
-
-    return () => clearInterval(interval);
   }, []);
 
   const handleIngest = async (filePath: string) => {
@@ -64,8 +74,10 @@ export function useKnowledgeBase(repoName: string, fetchDiagnostics: () => Promi
       if (data.status === "success") {
         setIngestionState("indexed");
         await fetchDiagnostics();
+        await fetchRepoContext(true);  // refresh last_indexed_file pill
         setIngestPath("");
-        setTimeout(() => setIngestionState("idle"), 3000);
+        // Fix #7: track idle reset timer so it can be cancelled on unmount
+        idleTimerRef.current = setTimeout(() => setIngestionState("idle"), 3000);
       } else {
         throw new Error(data.error || "Ingestion failed");
       }
@@ -82,9 +94,9 @@ export function useKnowledgeBase(repoName: string, fetchDiagnostics: () => Promi
       }
       setPendingSyncCount(pendingSync.length);
 
-      // Silent retries
+      // Fix #8: store retry interval ref so it's cleared on unmount
       let retries = 0;
-      const retryTimer = setInterval(async () => {
+      retryTimerRef.current = setInterval(async () => {
         retries++;
         try {
           const retryRes = await fetch("/api/kb/ingest", {
@@ -95,7 +107,7 @@ export function useKnowledgeBase(repoName: string, fetchDiagnostics: () => Promi
           if (retryRes.ok) {
             const retryData = await retryRes.json();
             if (retryData.status === "success") {
-              clearInterval(retryTimer);
+              if (retryTimerRef.current) clearInterval(retryTimerRef.current);
               const currPending = JSON.parse(localStorage.getItem("kb_pending_sync") || "[]").filter((f: string) => f !== filePath);
               localStorage.setItem("kb_pending_sync", JSON.stringify(currPending));
               setPendingSyncCount(currPending.length);
@@ -106,7 +118,8 @@ export function useKnowledgeBase(repoName: string, fetchDiagnostics: () => Promi
           console.error("Retry failed", e);
         }
         if (retries >= 3) {
-          clearInterval(retryTimer);
+          if (retryTimerRef.current) clearInterval(retryTimerRef.current);
+          setIngestError("[!] All retries exhausted. Re-ingest manually when network is available.");
         }
       }, 15000);
     }

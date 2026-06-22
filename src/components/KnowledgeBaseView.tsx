@@ -99,6 +99,7 @@ export default function KnowledgeBaseView({
             userQuery={userQuery}
             setUserQuery={setUserQuery}
             queryKnowledgeBase={queryKnowledgeBase}
+            chatLoading={chatLoading}
           />
         </div>
       )}

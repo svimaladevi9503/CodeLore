@@ -14,6 +14,7 @@ export default function CleanerAgentView({ theme, repoName, owner }: CleanerAgen
   const {
     treeData, treeLoading, totalCount, ignoredCount, expandedDirs, selectedFile,
     fileContent, fileLoading, issues, filterSeverity, sortBy, scanProgress, scanning,
+    scanError, setScanError, fixError, setFixError,
     showCodeViewer, highlightLines, fixPreview, applyingFix,
     nestedTree, filteredIssues, errorCount, warningCount, suggestionCount, resolvedCount, codeLines,
     setFilterSeverity, setSortBy, setShowCodeViewer, setHighlightLines, setFixPreview,
@@ -31,6 +32,10 @@ export default function CleanerAgentView({ theme, repoName, owner }: CleanerAgen
         warningCount={warningCount}
         suggestionCount={suggestionCount}
         resolvedCount={resolvedCount}
+        scanError={scanError}
+        fixError={fixError}
+        setScanError={setScanError}
+        setFixError={setFixError}
         runScan={runScan}
       />
 

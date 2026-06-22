@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useRef, useEffect } from "react";
 import { FileText, RefreshCw } from "lucide-react";
 import RippleLoader from "./RippleLoader";
 
 interface ChatMessage {
+  id?: string;
   sender: "user" | "agent";
   text: string;
   sources?: any[];
@@ -24,9 +25,17 @@ const ChatLogRenderer = ({
   setActiveCitationText,
   setRepoContext
 }: ChatLogRendererProps) => {
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Fix #4: auto-scroll to latest message
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatLog]);
+
+  // Fix #10: use message id as stable key
   const chatItems = React.useMemo(() => {
     return chatLog.map((msg, idx) => ({
-      id: `chat-msg-${idx}-${msg.sender}-${msg.timestamp}`,
+      id: (msg as any).id || `chat-fallback-${idx}-${msg.sender}`,
       msg
     }));
   }, [chatLog]);
@@ -114,6 +123,9 @@ const ChatLogRenderer = ({
           </div>
         </div>
       )}
+
+      {/* Invisible scroll anchor */}
+      <div ref={bottomRef} />
     </div>
   );
 };

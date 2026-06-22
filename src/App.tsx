@@ -11,6 +11,7 @@ import DocHelperView from "./components/DocHelperView";
 import KnowledgeBaseView from "./components/KnowledgeBaseView";
 import CleanerAgentView from "./components/CleanerAgentView";
 import VaultPanel from "./components/VaultPanel";
+import { useGitHub } from "./components/orchestrator/useGitHub";
 
 // Render the agent states for top bar health metrics
 const getAgentDotStyle = (active: boolean, err = false) => {
@@ -236,6 +237,7 @@ interface HeaderProps {
   docHelperStage: string;
   chatLoading: boolean;
   cleanerLoading: boolean;
+  repoName: string;
 }
 
 function Header({
@@ -244,7 +246,8 @@ function Header({
   orchResult,
   docHelperStage,
   chatLoading,
-  cleanerLoading
+  cleanerLoading,
+  repoName
 }: HeaderProps) {
   return (
     <header className={`border-b backdrop-blur-md sticky top-0 z-40 px-6 py-3 flex items-center justify-between shrink-0 transition-all duration-250 ${
@@ -313,7 +316,7 @@ function Header({
           <span className={`text-[12px] font-mono font-normal pl-2.5 border-l select-none leading-none ${
             theme === "dark" ? "text-slate-500 border-slate-800" : "text-slate-400 border-slate-300"
           }`}>
-            repo: custom-docs
+            repo: {repoName || "custom-docs"}
           </span>
         </div>
         <span className={`text-[11px] font-mono font-normal px-2 py-0.5 rounded select-none border transition-colors duration-250 ${
@@ -446,7 +449,6 @@ function AgentLens({
           </div>
           <div className="mt-1 flex items-center justify-between text-[12px] pl-1 text-slate-500 font-mono">
             <span>{docHelperStage}</span>
-            <span>10 min ago</span>
           </div>
           <div className="mt-1.5 text-[12px] text-slate-500 font-mono truncate pl-1 border-t border-slate-900/30 pt-1">
             Updated Readme snapshot
@@ -469,7 +471,6 @@ function AgentLens({
           </div>
           <div className="mt-1 flex items-center justify-between text-[12px] pl-1 text-slate-500 font-mono">
             <span>{chatLoading ? "querying" : "idle"}</span>
-            <span>Just now</span>
           </div>
           <div className="mt-1.5 text-[12px] text-slate-500 font-mono truncate pl-1 border-t border-slate-900/30 pt-1">
             RAG vectors mapped
@@ -492,7 +493,6 @@ function AgentLens({
           </div>
           <div className="mt-1 flex items-center justify-between text-[12px] pl-1 text-slate-500 font-mono">
             <span>{cleanerLoading ? "scanning" : "idle"}</span>
-            <span>1 hour ago</span>
           </div>
           <div className="mt-1.5 text-[12px] text-slate-500 font-mono truncate pl-1 border-t border-slate-900/30 pt-1">
             Suggested unreferenced imports
@@ -520,9 +520,14 @@ interface CompareOverlayProps {
 }
 
 function CompareOverlay({ overlay, onClose }: CompareOverlayProps) {
-  if (!overlay) return null;
+  // Note: rendered conditionally via AnimatePresence in App — no null guard needed here
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <m.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4"
+    >
       <m.div
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
@@ -532,7 +537,7 @@ function CompareOverlay({ overlay, onClose }: CompareOverlayProps) {
         <div className="p-4 border-b border-slate-800 flex items-center justify-between">
           <div>
             <h4 className="text-[14px] font-sans font-medium text-white">Compare README snapshots</h4>
-            <p className="text-[12px] text-slate-400 mt-0.5">SHA version code reference: {overlay.sha}</p>
+            <p className="text-[12px] text-slate-400 mt-0.5">SHA version code reference: {overlay?.sha}</p>
           </div>
           <button
             type="button"
@@ -550,7 +555,7 @@ function CompareOverlay({ overlay, onClose }: CompareOverlayProps) {
               Original template baseline
             </div>
             <pre className="bg-slate-900/40 border border-slate-900 p-2 text-slate-450 whitespace-pre-wrap rounded">
-              {overlay.oldContent}
+              {overlay?.oldContent}
             </pre>
           </div>
 
@@ -559,7 +564,7 @@ function CompareOverlay({ overlay, onClose }: CompareOverlayProps) {
               Indexed snapshot backup content
             </div>
             <pre className="bg-slate-900 border border-slate-800 p-3 text-slate-300 whitespace-pre-wrap rounded">
-              {overlay.newContent}
+              {overlay?.newContent}
             </pre>
           </div>
         </div>
@@ -574,7 +579,7 @@ function CompareOverlay({ overlay, onClose }: CompareOverlayProps) {
           </button>
         </div>
       </m.div>
-    </div>
+    </m.div>
   );
 }
 
@@ -754,6 +759,12 @@ export default function Sandbox() {
   const [activeRepoName, setActiveRepoName] = React.useState<string>("");
   const [switchBanner, setSwitchBanner] = React.useState<{ show: boolean; repoName: string }>({ show: false, repoName: "" });
 
+  // Single shared GitHub context — lifted here so DocHelper and Orchestrator share the same fetch
+  const github = useGitHub({
+    repoName: activeRepoName || docHelperState.repoName,
+    routingEvents: uiState.routingEvents
+  });
+
   useEffect(() => {
     fetchDiagnostics();
   }, []);
@@ -858,16 +869,17 @@ export default function Sandbox() {
         dispatchDocHelper({ type: "SET_STAGE", value: "opening_pr" });
         dispatchUi({ type: "SET_ACTIVE_TAB", value: "docs" });
       } else if (targetAgent === "CLEANER AGENT" && data.status === "success" && data.result) {
-        dispatchCleaner({ type: "SET_SCANNED_ISSUES", value: data.result.issues });
+        dispatchCleaner({ type: "SET_ISSUES", value: data.result.issues });
         dispatchUi({ type: "SET_ACTIVE_TAB", value: "cleaner" });
       } else if (targetAgent === "KNOWLEDGE BASE AGENT" && data.status === "success" && data.result) {
         dispatchKb({
-          type: "ADD_MESSAGE",
+          type: "ADD_OR_UPDATE_STREAMING_MSG",
           value: {
             id: `msg_ans_${Date.now()}`,
-            role: "assistant",
-            content: data.result.answer,
-            sources: data.result.sources
+            sender: "agent" as const,
+            text: data.result.answer,
+            sources: data.result.sources ?? [],
+            timestamp: new Date().toLocaleTimeString()
           }
         });
         dispatchUi({ type: "SET_ACTIVE_TAB", value: "kb" });
@@ -1186,7 +1198,8 @@ export default function Sandbox() {
     activeRepoName,
     setGlobalRepoName,
     switchBanner,
-    setSwitchBanner
+    setSwitchBanner,
+    github
   };
 }
 
@@ -1214,7 +1227,8 @@ export default function App() {
     activeRepoName,
     setGlobalRepoName,
     switchBanner,
-    setSwitchBanner
+    setSwitchBanner,
+    github
   } = useAppLogic();
 
   return (
@@ -1233,6 +1247,7 @@ export default function App() {
           docHelperStage={docHelperState.stage}
           chatLoading={kbState.chatLoading}
           cleanerLoading={cleanerState.cleanerLoading}
+          repoName={activeRepoName || docHelperState.repoName}
         />
 
         {/* ----------------- LAYOUT 3 PANEL WORKSPACE ----------------- */}
@@ -1271,6 +1286,19 @@ export default function App() {
                     routingEvents={uiState.routingEvents}
                     repoName={activeRepoName || docHelperState.repoName}
                     setRepoName={setGlobalRepoName}
+                    token={github.token}
+                    inputToken={github.inputToken}
+                    setInputToken={github.setInputToken}
+                    ghUser={github.ghUser}
+                    ghRepos={github.ghRepos}
+                    loadingGh={github.loadingGh}
+                    errorGh={github.errorGh}
+                    commits={github.commits}
+                    loadingCommits={github.loadingCommits}
+                    errorCommits={github.errorCommits}
+                    fetchCommits={github.fetchCommits}
+                    handleConnect={github.handleConnect}
+                    handleDisconnect={github.handleDisconnect}
                   />
                 </m.div>
               )}
@@ -1288,6 +1316,9 @@ export default function App() {
                     repoName={activeRepoName || docHelperState.repoName}
                     setRepoName={setGlobalRepoName}
                     fetchDiagnostics={fetchDiagnostics}
+                    token={github.token}
+                    ghUser={github.ghUser}
+                    ghRepos={github.ghRepos}
                   />
                 </m.div>
               )}
@@ -1338,8 +1369,12 @@ export default function App() {
 
           </main>
 
-          {/* --- RIGHT PANEL: CodeLore Vault (260px) --- */}
-          <aside className="lg:w-[260px] shrink-0 bg-slate-950/20 border border-slate-850 rounded-2xl p-4 overflow-y-auto hidden lg:block">
+          {/* --- RIGHT PANEL / MOBILE DRAWER: CodeLore Vault --- */}
+          <aside className={`shrink-0 overflow-y-auto transition-all ${
+            uiState.vaultOpenOnMobile
+              ? "fixed bottom-[44px] left-0 right-0 z-50 bg-slate-950 max-h-[350px] border-t border-slate-900 p-4 shadow-2xl lg:relative lg:bottom-auto lg:z-auto lg:max-h-none lg:w-[260px] lg:bg-slate-950/20 lg:border lg:border-slate-850 lg:rounded-2xl lg:shadow-none lg:p-4"
+              : "hidden lg:block lg:relative lg:w-[260px] lg:bg-slate-950/20 lg:border lg:border-slate-850 lg:rounded-2xl lg:p-4 lg:z-auto"
+          }`}>
             <VaultPanel
               sysInfo={uiState.sysInfo}
               parcleData={uiState.parcleData}
@@ -1356,39 +1391,26 @@ export default function App() {
         </div>
 
         {/* Mobile Vault drawer handle collapses */}
-        <div className="lg:hidden shrink-0 border-t border-slate-900 bg-slate-950 select-none">
+        <div className="lg:hidden shrink-0 border-t border-slate-900 bg-slate-950 select-none relative z-[51] h-[44px]">
           <button
             type="button"
             onClick={() => dispatchUi({ type: "SET_VAULT_MOBILE", value: !uiState.vaultOpenOnMobile })}
-            className="w-full text-center py-3 text-[12px] font-sans font-medium text-purple-400 hover:text-purple-300 flex items-center justify-center gap-1 cursor-pointer"
+            className="w-full h-full text-center text-[12px] font-sans font-medium text-purple-400 hover:text-purple-300 flex items-center justify-center gap-1 cursor-pointer"
           >
             <Database className="h-3.5 w-3.5" />
             <span>{uiState.vaultOpenOnMobile ? "Collapse CodeLore Vault" : "Expand CodeLore Vault drawer"}</span>
           </button>
-
-          {uiState.vaultOpenOnMobile && (
-            <div className="p-4 bg-slate-950 max-h-[350px] overflow-y-auto border-t border-slate-900">
-              <VaultPanel
-                sysInfo={uiState.sysInfo}
-                parcleData={uiState.parcleData}
-                setHistoricDiffOverlay={(val) => dispatchUi({ type: "SET_DIFF_OVERLAY", value: val })}
-                setActiveTab={(tab) => dispatchUi({ type: "SET_ACTIVE_TAB", value: tab })}
-                theme={uiState.theme}
-                vaultOpenOnMobile={uiState.vaultOpenOnMobile}
-                setVaultOpenOnMobile={(val) => dispatchUi({ type: "SET_VAULT_MOBILE", value: val })}
-                activeTab={uiState.activeTab}
-                repoName={activeRepoName || docHelperState.repoName || "custom-docs"}
-              />
-            </div>
-          )}
         </div>
 
         {/* ----------------- CORE INTERACTIVE HISTORICAL COMPARE OVERLAY ----------------- */}
         <AnimatePresence>
-          <CompareOverlay
-            overlay={uiState.historicDiffOverlay}
-            onClose={() => dispatchUi({ type: "SET_DIFF_OVERLAY", value: null })}
-          />
+          {uiState.historicDiffOverlay && (
+            <CompareOverlay
+              key="compare-overlay"
+              overlay={uiState.historicDiffOverlay}
+              onClose={() => dispatchUi({ type: "SET_DIFF_OVERLAY", value: null })}
+            />
+          )}
         </AnimatePresence>
 
         {/* Footer Explicitly Humble */}

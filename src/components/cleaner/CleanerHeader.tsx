@@ -1,5 +1,5 @@
 import React from "react";
-import { ChevronRight, Sparkles, RefreshCw, Play } from "lucide-react";
+import { AlertCircle, ChevronRight, Sparkles, RefreshCw, Play, X } from "lucide-react";
 
 export interface CleanerHeaderProps {
   isDark: boolean;
@@ -10,12 +10,17 @@ export interface CleanerHeaderProps {
   warningCount: number;
   suggestionCount: number;
   resolvedCount: number;
+  scanError: string | null;
+  fixError: string | null;
+  setScanError: (val: string | null) => void;
+  setFixError: (val: string | null) => void;
   runScan: () => void;
 }
 
 export function CleanerHeader({
   isDark, scanning, treeLoading,
   issuesLength, errorCount, warningCount, suggestionCount, resolvedCount,
+  scanError, fixError, setScanError, setFixError,
   runScan
 }: CleanerHeaderProps) {
   return (
@@ -83,6 +88,29 @@ export function CleanerHeader({
               />
             </div>
           </div>
+        </div>
+      )}
+      {/* Inline error banners */}
+      {scanError && (
+        <div className={`rounded-lg border p-3 flex items-center gap-2 text-[12px] ${
+          isDark ? "bg-red-500/10 border-red-500/30" : "bg-red-50 border-red-200"
+        }`}>
+          <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
+          <span className="text-red-400 flex-1">{scanError}</span>
+          <button type="button" onClick={() => setScanError(null)} className="text-red-400 hover:text-red-300 cursor-pointer">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+      {fixError && (
+        <div className={`rounded-lg border p-3 flex items-center gap-2 text-[12px] ${
+          isDark ? "bg-red-500/10 border-red-500/30" : "bg-red-50 border-red-200"
+        }`}>
+          <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
+          <span className="text-red-400 flex-1">{fixError}</span>
+          <button type="button" onClick={() => setFixError(null)} className="text-red-400 hover:text-red-300 cursor-pointer">
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
     </>

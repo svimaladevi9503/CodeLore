@@ -279,28 +279,42 @@ export default function VaultPanel({
               <span>Patch log</span>
             </div>
 
-            {/* Static Cleaner Scan History */}
-            <div className="flex flex-col gap-1.5">
-              <button 
-                type="button"
-                onClick={() => setActiveTab("cleaner")}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    setActiveTab("cleaner");
-                  }
-                }}
-                className="w-full text-left p-2.5 bg-slate-950/20 border border-slate-900 hover:border-purple-500/40 rounded transition flex items-center justify-between gap-3 font-mono text-[11px] leading-snug cursor-pointer select-none"
-              >
-                <div>
-                  <div className="text-slate-300 font-medium">AST scanning report</div>
-                  <div className="text-slate-500 text-[10px] mt-0.5">Scanned Sandbox.tsx candidate</div>
-                </div>
-                <div className="text-right">
-                  <span className="text-amber-500 block font-medium">suggested</span>
-                  <span className="text-[10px] text-slate-650 block mt-0.5">2026-06-21</span>
-                </div>
-              </button>
-            </div>
+            {/* Dynamic Patch Log */}
+            {cleanerPatchLog.length === 0 ? (
+              <div className="text-[11px] text-slate-650 font-mono py-2 text-center bg-slate-950/20 border border-slate-900 rounded">
+                No patches applied yet.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-1.5 max-h-[150px] overflow-y-auto">
+                {cleanerPatchLog.slice(-3).reverse().map((patch: any, idx: number) => (
+                  <button 
+                    key={`patch-history-${idx}`}
+                    type="button"
+                    onClick={() => setActiveTab("cleaner")}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        setActiveTab("cleaner");
+                      }
+                    }}
+                    className="w-full text-left p-2.5 bg-slate-950/20 border border-slate-900 hover:border-purple-500/40 rounded transition flex items-center justify-between gap-3 font-mono text-[11px] leading-snug cursor-pointer select-none"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="text-slate-300 font-medium truncate">{patch.title || "AST scanning report"}</div>
+                      <div className="text-slate-500 text-[10px] mt-0.5 truncate">
+                        <FileCode className="h-2.5 w-2.5 inline mr-1" />
+                        {patch.file}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className="text-amber-500 block font-medium">{patch.category || "suggested"}</span>
+                      <span className="text-[10px] text-slate-650 block mt-0.5">
+                        {patch.timestamp ? new Date(patch.timestamp).toLocaleDateString() : "—"}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
         </div>

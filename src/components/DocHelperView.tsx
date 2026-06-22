@@ -124,18 +124,21 @@ interface DocHelperViewProps {
   repoName: string;
   setRepoName: (val: string) => void;
   fetchDiagnostics?: () => void;
+  // GitHub state — shared from App.tsx via the single useGitHub instance
+  token: string;
+  ghUser: { login: string; avatar_url: string } | null;
+  ghRepos: Array<{ id: number; name: string; full_name: string }>;
 }
 
 export default function DocHelperView({
   theme,
   repoName,
   setRepoName,
-  fetchDiagnostics
+  fetchDiagnostics,
+  token,
+  ghUser,
+  ghRepos
 }: DocHelperViewProps) {
-  // GitHub integration context
-  const [token] = useState(() => localStorage.getItem("github_token") || "");
-  const [ghUser, setGhUser] = useState<{ login: string; avatar_url: string } | null>(null);
-  const [ghRepos, setGhRepos] = useState<Array<{ id: number; name: string; full_name: string }>>([]);
 
   // Readme state
   const [readmeExists, setReadmeExists] = useState<boolean | null>(null);
@@ -213,6 +216,15 @@ export default function DocHelperView({
   const [previewMode, setPreviewMode] = useState<"code" | "preview">("code");
   const [progress, setProgress] = useState(0);
 
+  // Fix #6: replace alert()/confirm() with inline UI
+  const [toast, setToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+
+  const showToast = (type: "success" | "error", text: string) => {
+    setToast({ type, text });
+    setTimeout(() => setToast(null), 4500);
+  };
+
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (generating) {
@@ -234,31 +246,6 @@ export default function DocHelperView({
       if (interval) clearInterval(interval);
     };
   }, [generating]);
-
-  // Load GitHub context
-  useEffect(() => {
-    if (!token) return;
-    const fetchUserData = async () => {
-      try {
-        const userRes = await fetch("https://api.github.com/user", {
-          headers: { Authorization: `token ${token}` }
-        });
-        if (!userRes.ok) return;
-        const userData = await userRes.json();
-        setGhUser({ login: userData.login, avatar_url: userData.avatar_url });
-
-        const reposRes = await fetch("https://api.github.com/user/repos?sort=updated&per_page=100", {
-          headers: { Authorization: `token ${token}` }
-        });
-        if (reposRes.ok) {
-          setGhRepos(await reposRes.json());
-        }
-      } catch (err) {
-        console.error("Failed to load GitHub context", err);
-      }
-    };
-    fetchUserData();
-  }, [token]);
 
   // Fetch repository README content
   const checkReadmeStatus = async () => {
@@ -297,21 +284,25 @@ export default function DocHelperView({
     }
   };
 
+  // Fix #14: remove ghRepos from dep array — its change alone shouldn't trigger a refetch
   useEffect(() => {
     if (token && repoName && ghUser) {
       checkReadmeStatus();
     }
-  }, [repoName, token, ghUser, ghRepos]);
+  }, [repoName, token, ghUser]);
 
   // Delete README file
   const handleDeleteReadme = async () => {
     if (!token || !repoName || !ghUser || !readmeSha) return;
-    if (!confirm("Are you sure you want to delete this repository's README.md? This cannot be undone.")) return;
-    
+    setConfirmDeleteOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    setConfirmDeleteOpen(false);
     setDeleting(true);
     try {
       const selected = ghRepos.find(r => r.name === repoName);
-      const fullName = selected ? selected.full_name : `${ghUser.login}/${repoName}`;
+      const fullName = selected ? selected.full_name : `${ghUser!.login}/${repoName}`;
       const res = await fetch("/api/github/delete-readme", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -322,9 +313,10 @@ export default function DocHelperView({
       setReadmeContent("");
       setDraftContent("");
       setReadmeSha("");
+      showToast("success", "README.md deleted from repository.");
       if (fetchDiagnostics) fetchDiagnostics();
     } catch (err: any) {
-      alert(err.message || "Deletion failed");
+      showToast("error", err.message || "Deletion failed");
     } finally {
       setDeleting(false);
     }
@@ -361,7 +353,7 @@ export default function DocHelperView({
         { sender: "gemini", text: "Successfully generated the template using readme-ai! Review the preview on the right. You can request specific text refinements or add custom sections here." }
       ]);
     } catch (err: any) {
-      alert(err.message || "Generation failed");
+      showToast("error", err.message || "Generation failed");
     } finally {
       setGenerating(false);
     }
@@ -415,7 +407,7 @@ export default function DocHelperView({
       });
       if (!res.ok) throw new Error("Commit push rejected by remote GitHub server");
       const data = await res.json();
-      alert("Successfully pushed README.md to your repository!");
+      showToast("success", "Successfully pushed README.md to your repository!");
       
       // Update local state variables
       setReadmeExists(true);
@@ -424,7 +416,7 @@ export default function DocHelperView({
       
       if (fetchDiagnostics) fetchDiagnostics();
     } catch (err: any) {
-      alert(err.message || "Failed to commit changes");
+      showToast("error", err.message || "Failed to commit changes");
     } finally {
       setPushing(false);
     }
@@ -432,6 +424,56 @@ export default function DocHelperView({
 
   return (
     <div className="flex flex-col gap-6">
+
+      {/* Fix #6: Inline toast notification (replaces alert()) */}
+      {toast && (
+        <div className={`fixed top-4 right-4 z-[9999] flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl border text-[12px] font-sans font-medium max-w-sm animate-fade-in ${
+          toast.type === "success"
+            ? "bg-emerald-900/90 border-emerald-500/40 text-emerald-200"
+            : "bg-red-900/90 border-red-500/40 text-red-200"
+        }`}>
+          <span>{toast.type === "success" ? "✓" : "✗"}</span>
+          <span className="flex-1">{toast.text}</span>
+          <button type="button" onClick={() => setToast(null)} className="opacity-60 hover:opacity-100 cursor-pointer text-inherit">✕</button>
+        </div>
+      )}
+
+      {/* Fix #6: Inline delete confirmation (replaces confirm()) */}
+      {confirmDeleteOpen && (
+        <div className="fixed inset-0 z-[9998] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`rounded-xl border p-5 flex flex-col gap-4 w-full max-w-sm shadow-2xl ${
+            theme === "dark" ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+          }`}>
+            <div className="flex flex-col gap-1.5">
+              <h4 className={`text-[14px] font-sans font-medium ${theme === "dark" ? "text-white" : "text-slate-800"}`}>
+                Delete README.md?
+              </h4>
+              <p className={`text-[12px] font-sans font-normal ${theme === "dark" ? "text-slate-400" : "text-slate-500"}`}>
+                This will permanently delete the repository's README.md file. This cannot be undone.
+              </p>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteOpen(false)}
+                className={`px-4 py-1.5 rounded-lg text-[12px] font-medium border transition cursor-pointer ${
+                  theme === "dark" ? "border-slate-700 text-slate-300 hover:bg-slate-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                className="px-4 py-1.5 rounded-lg text-[12px] font-medium bg-red-600 hover:bg-red-500 text-white transition cursor-pointer"
+              >
+                Delete README
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Breadcrumb row */}
       <div className={`text-[12px] font-mono tracking-tight flex items-center gap-1 ${
         theme === "dark" ? "text-slate-500" : "text-slate-400"
