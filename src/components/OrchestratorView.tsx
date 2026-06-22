@@ -151,9 +151,9 @@ export default function OrchestratorView({
             <div className="flex flex-col sm:flex-row gap-3">
               <a
                 href="/api/github/login"
-                className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white px-4 py-2.5 rounded-lg font-sans text-[12px] font-medium cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 transition w-full sm:w-auto shadow-md shadow-purple-500/10"
+                className="bg-white border border-purple-500/80 hover:bg-purple-50/50 text-purple-700 px-4 py-2.5 rounded-lg font-sans text-[12px] font-medium cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 transition w-full sm:w-auto shadow-sm"
               >
-                <Github className="h-3.5 w-3.5" />
+                <Github className="h-3.5 w-3.5 text-purple-600" />
                 <span>Sign in with GitHub OAuth</span>
               </a>
 
@@ -169,12 +169,12 @@ export default function OrchestratorView({
                   type="button"
                   onClick={handleConnect}
                   disabled={loadingGh}
-                  className="bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white px-4 py-2.5 rounded-lg font-sans text-[12px] font-medium cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 transition disabled:opacity-50 shadow-md shadow-teal-500/10"
+                  className="bg-white border border-teal-500/80 hover:bg-teal-50/50 text-teal-700 px-4 py-2.5 rounded-lg font-sans text-[12px] font-medium cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 transition disabled:opacity-50 shadow-sm"
                 >
                   {loadingGh ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-teal-600" />
                   ) : (
-                    <KeyRound className="h-3.5 w-3.5" />
+                    <KeyRound className="h-3.5 w-3.5 text-teal-600" />
                   )}
                   <span>Connect</span>
                 </button>
