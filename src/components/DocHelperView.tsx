@@ -211,6 +211,29 @@ export default function DocHelperView({
 
   const [showSettings, setShowSettings] = useState(false);
   const [previewMode, setPreviewMode] = useState<"code" | "preview">("code");
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (generating) {
+      setProgress(0);
+      interval = setInterval(() => {
+        setProgress((prev) => {
+          if (prev >= 95) {
+            clearInterval(interval);
+            return 95;
+          }
+          const diff = Math.max(1, Math.floor((98 - prev) / 12));
+          return prev + diff;
+        });
+      }, 400);
+    } else {
+      setProgress(0);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [generating]);
 
   // Load GitHub context
   useEffect(() => {
@@ -607,7 +630,7 @@ export default function DocHelperView({
                   {generating ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin text-teal-650" />
-                      <span>Analyzing structure & building README...</span>
+                      <span>Generating README ({progress}%)...</span>
                     </>
                   ) : (
                     <>
@@ -616,6 +639,33 @@ export default function DocHelperView({
                     </>
                   )}
                 </button>
+
+                {generating && (
+                  <div className="flex flex-col gap-1.5 mt-2 font-sans">
+                    <div className="flex justify-between items-center text-[10.5px] font-mono">
+                      <span className={theme === "dark" ? "text-slate-450" : "text-slate-500"}>
+                        {progress < 25 
+                          ? "Cloning repository..." 
+                          : progress < 55 
+                            ? "Analyzing project structure..." 
+                            : progress < 80 
+                              ? "Generating documentation..." 
+                              : "Polishing final layout..."}
+                      </span>
+                      <span className="text-teal-400 font-semibold">{progress}%</span>
+                    </div>
+                    <div className={`w-full h-1.5 rounded-full overflow-hidden ${
+                      theme === "dark" ? "bg-slate-900" : "bg-slate-100"
+                    }`}>
+                      <m.div
+                        className="h-full bg-teal-500"
+                        initial={{ width: "0%" }}
+                        animate={{ width: `${progress}%` }}
+                        transition={{ ease: "easeOut", duration: 0.2 }}
+                      />
+                    </div>
+                  </div>
+                )}
 
               </div>
             </div>
