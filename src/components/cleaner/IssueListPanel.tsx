@@ -2,7 +2,7 @@ import React from "react";
 import { Code2 } from "lucide-react";
 import { CleanerIssue } from "../../types";
 import { TodoCard } from "./TodoCard";
-
+import { RunScanButton } from "./RunScanButton";
 export interface IssueListPanelProps {
   isDark: boolean;
   theme: string;
@@ -16,12 +16,13 @@ export interface IssueListPanelProps {
   setSortBy: (val: "file" | "severity" | "category") => void;
   viewIssue: (issue: CleanerIssue) => void;
   showFixPreview: (issue: CleanerIssue) => void;
+  runScan: () => void;
 }
 
 export function IssueListPanel({
   isDark, theme, repoName, issues, filteredIssues,
   filterSeverity, sortBy, scanning,
-  setFilterSeverity, setSortBy, viewIssue, showFixPreview
+  setFilterSeverity, setSortBy, viewIssue, showFixPreview, runScan
 }: IssueListPanelProps) {
   return (
     <>
@@ -79,12 +80,10 @@ export function IssueListPanel({
       {/* Issue list */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {issues.length === 0 && !scanning ? (
-          <div className={`py-16 text-center ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+          <div className={`py-16 text-center flex flex-col items-center ${isDark ? "text-slate-500" : "text-slate-400"}`}>
             <Code2 className={`h-10 w-10 mx-auto mb-3 ${isDark ? "text-slate-700" : "text-slate-300"}`} />
-            <p className="text-[13px] font-sans font-medium mb-1">No issues found yet</p>
-            <p className="text-[11px] font-mono">
-              Click <strong className="text-amber-400">Run Full Scan</strong> to analyze your codebase with Gemini
-            </p>
+            <p className="text-[13px] font-sans font-medium mb-3">No issues found yet</p>
+            <RunScanButton scanning={scanning} onRunScan={runScan} />
           </div>
         ) : (
           filteredIssues.map((issue, idx) => (

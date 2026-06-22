@@ -88,6 +88,7 @@ export default function CleanerAgentView({ theme, repoName, owner }: CleanerAgen
               setSortBy={setSortBy}
               viewIssue={viewIssue}
               showFixPreview={showFixPreview}
+              runScan={runScan}
             />
           )}
         </div>

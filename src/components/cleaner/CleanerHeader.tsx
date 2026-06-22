@@ -1,5 +1,6 @@
 import React from "react";
-import { AlertCircle, ChevronRight, Sparkles, RefreshCw, Play, X } from "lucide-react";
+import { AlertCircle, ChevronRight, Sparkles, X } from "lucide-react";
+import { RunScanButton } from "./RunScanButton";
 
 export interface CleanerHeaderProps {
   isDark: boolean;
@@ -47,24 +48,11 @@ export function CleanerHeader({
             6-category Gemini-powered code review with auto-fix patches
           </p>
         </div>
-        <button
-          type="button"
-          onClick={runScan}
-          disabled={scanning || treeLoading}
-          className="bg-amber-500 hover:bg-amber-400 text-black font-sans font-medium text-[12px] py-2 px-5 rounded-lg cursor-pointer transition active:scale-95 disabled:opacity-50 flex items-center gap-2"
-        >
-          {scanning ? (
-            <>
-              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-              <span>Scanning...</span>
-            </>
-          ) : (
-            <>
-              <Play className="h-3.5 w-3.5" />
-              <span>Run Full Scan</span>
-            </>
-          )}
-        </button>
+        <RunScanButton 
+          scanning={scanning} 
+          disabled={treeLoading} 
+          onRunScan={runScan} 
+        />
       </div>
 
       {/* ─── SUMMARY BAR ─────────────────────────────────────────────── */}
