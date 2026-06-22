@@ -47,31 +47,7 @@ const navigationStyleOptions = [
   { value: "roman", label: "Roman Numerals" }
 ];
 
-function useGenerationProgress(generating: boolean) {
-  const [progress, setProgress] = useState(0);
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (generating) {
-      setProgress(0);
-      interval = setInterval(() => {
-        setProgress((prev) => {
-          if (prev >= 95) {
-            clearInterval(interval);
-            return 95;
-          }
-          const diff = Math.max(1, Math.floor((98 - prev) / 12));
-          return prev + diff;
-        });
-      }, 400);
-    } else {
-      setProgress(0);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [generating]);
-  return progress;
-}
+
 
 interface ReadmeAiSettingsProps {
   theme: "light" | "dark";
@@ -106,7 +82,24 @@ export default function ReadmeAiSettings({
   generating,
   readmeExists
 }: ReadmeAiSettingsProps) {
-  const progress = useGenerationProgress(generating);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    if (!generating) return;
+    const interval = setInterval(() => {
+      setProgress((prev) => {
+        if (prev >= 95) return 95;
+        const diff = Math.max(1, Math.floor((98 - prev) / 12));
+        return prev + diff;
+      });
+    }, 400);
+    return () => clearInterval(interval);
+  }, [generating]);
+
+  const handleGenerate = () => {
+    setProgress(0);
+    onGenerate();
+  };
 
   return (
     <div
@@ -162,7 +155,7 @@ export default function ReadmeAiSettings({
 
         <button
           type="button"
-          onClick={onGenerate}
+          onClick={handleGenerate}
           disabled={generating}
           className={`mt-2 px-4 py-2.5 rounded-lg font-sans text-[12px] font-semibold cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 transition disabled:opacity-50 shadow-sm border ${
             theme === "dark"

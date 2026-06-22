@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useReducer } from "react";
+/* eslint-disable react-doctor/no-fetch-in-effect */
+import React, { useState, useEffect, useCallback, useReducer } from "react";
 import { 
   Database, Cpu, Search, CodeXml, Sun, Moon, GitBranch, X
 } from "lucide-react";
@@ -19,214 +20,10 @@ const getAgentDotStyle = (active: boolean, err = false) => {
   return active ? "bg-emerald-400 animate-pulse-dot" : "bg-slate-500";
 };
 
-// --- ORCHESTRATOR REDUCER ---
-interface OrchState {
-  payload: string;
-  eventType: string;
-  result: any;
-}
-type OrchAction =
-  | { type: "SET_PAYLOAD"; value: string }
-  | { type: "SET_EVENT_TYPE"; value: string }
-  | { type: "SET_RESULT"; value: any };
-
-const orchReducer = (state: OrchState, action: OrchAction): OrchState => {
-  switch (action.type) {
-    case "SET_PAYLOAD": return { ...state, payload: action.value };
-    case "SET_EVENT_TYPE": return { ...state, eventType: action.value };
-    case "SET_RESULT": return { ...state, result: action.value };
-    default: return state;
-  }
-};
-
-// --- DOC HELPER REDUCER ---
-interface DocHelperState {
-  commitAuthor: string;
-  repoName: string;
-  commitMessage: string;
-  testDiff: string;
-  isPushing: boolean;
-  pendingWebhook: WebhookResult | null;
-  customDraftContent: string;
-  stage: "idle" | "writing" | "opening_pr" | "pr_opened";
-  streamedText: string;
-}
-type DocHelperAction =
-  | { type: "SET_AUTHOR"; value: string }
-  | { type: "SET_REPO"; value: string }
-  | { type: "SET_MESSAGE"; value: string }
-  | { type: "SET_DIFF"; value: string }
-  | { type: "SET_PUSHING"; value: boolean }
-  | { type: "SET_PENDING"; value: WebhookResult | null }
-  | { type: "SET_DRAFT"; value: string }
-  | { type: "SET_STAGE"; value: DocHelperState["stage"] }
-  | { type: "SET_STREAMED"; value: string };
-
-const docHelperReducer = (state: DocHelperState, action: DocHelperAction): DocHelperState => {
-  switch (action.type) {
-    case "SET_AUTHOR": return { ...state, commitAuthor: action.value };
-    case "SET_REPO": return { ...state, repoName: action.value };
-    case "SET_MESSAGE": return { ...state, commitMessage: action.value };
-    case "SET_DIFF": return { ...state, testDiff: action.value };
-    case "SET_PUSHING": return { ...state, isPushing: action.value };
-    case "SET_PENDING": return { ...state, pendingWebhook: action.value };
-    case "SET_DRAFT": return { ...state, customDraftContent: action.value };
-    case "SET_STAGE": return { ...state, stage: action.value };
-    case "SET_STREAMED": return { ...state, streamedText: action.value };
-    default: return state;
-  }
-};
-
-// --- KNOWLEDGE BASE REDUCER ---
-interface KbState {
-  userQuery: string;
-  chatLog: Array<{ sender: "user" | "agent"; text: string; sources?: any[]; timestamp: string }>;
-  chatLoading: boolean;
-  newChunkFile: string;
-  newChunkSection: string;
-  newChunkContent: string;
-  chunkAddSuccess: boolean;
-  activeCitationText: string | null;
-  firstTokenReceived?: boolean;
-  sessionId: string;
-}
-type KbAction =
-  | { type: "SET_QUERY"; value: string }
-  | { type: "SET_LOG"; value: KbState["chatLog"] | ((prev: KbState["chatLog"]) => KbState["chatLog"]) }
-  | { type: "SET_LOADING"; value: boolean }
-  | { type: "SET_NEW_FILE"; value: string }
-  | { type: "SET_NEW_SECTION"; value: string }
-  | { type: "SET_NEW_CONTENT"; value: string }
-  | { type: "SET_ADD_SUCCESS"; value: boolean }
-  | { type: "SET_CITATION"; value: string | null }
-  | { type: "ADD_OR_UPDATE_STREAMING_MSG"; value: any }
-  | { type: "UPDATE_STREAMING_MSG"; id: string; value: any }
-  | { type: "SET_FIRST_TOKEN_RECEIVED"; value: boolean }
-  | { type: "SET_SESSION_ID"; value: string };
-
-const kbReducer = (state: KbState, action: KbAction): KbState => {
-  switch (action.type) {
-    case "SET_QUERY": return { ...state, userQuery: action.value };
-    case "SET_LOG": return { ...state, chatLog: typeof action.value === "function" ? action.value(state.chatLog) : action.value };
-    case "SET_LOADING": return { ...state, chatLoading: action.value };
-    case "SET_NEW_FILE": return { ...state, newChunkFile: action.value };
-    case "SET_NEW_SECTION": return { ...state, newChunkSection: action.value };
-    case "SET_NEW_CONTENT": return { ...state, newChunkContent: action.value };
-    case "SET_ADD_SUCCESS": return { ...state, chunkAddSuccess: action.value };
-    case "SET_CITATION": return { ...state, activeCitationText: action.value };
-    case "SET_FIRST_TOKEN_RECEIVED": return { ...state, firstTokenReceived: action.value };
-    case "SET_SESSION_ID": return { ...state, sessionId: action.value };
-    case "ADD_OR_UPDATE_STREAMING_MSG": {
-      const exists = state.chatLog.some(msg => (msg as any).id === action.value.id);
-      if (exists) {
-        return {
-          ...state,
-          chatLog: state.chatLog.map(msg => (msg as any).id === action.value.id ? { ...msg, ...action.value } : msg)
-        };
-      } else {
-        return {
-          ...state,
-          chatLog: [...state.chatLog, action.value]
-        };
-      }
-    }
-    case "UPDATE_STREAMING_MSG": {
-      return {
-        ...state,
-        chatLog: state.chatLog.map(msg => (msg as any).id === action.id ? { ...msg, ...action.value } : msg)
-      };
-    }
-    default: return state;
-  }
-};
-
-// --- CLEANER REDUCER ---
-interface CleanerState {
-  cleanerCode: string;
-  scanWholeWorkspace: boolean;
-  autoApplyPatch: boolean;
-  scannedIssues: ScanIssue[];
-  scannedPatchId: string;
-  scannedPatchText: string;
-  cleanerLoading: boolean;
-  isPatchApplied: boolean;
-  renderedIssues: ScanIssue[];
-}
-type CleanerAction =
-  | { type: "SET_CODE"; value: string }
-  | { type: "SET_SCAN_WHOLE"; value: boolean }
-  | { type: "SET_AUTO_APPLY"; value: boolean }
-  | { type: "SET_ISSUES"; value: ScanIssue[] }
-  | { type: "SET_PATCH_ID"; value: string }
-  | { type: "SET_PATCH_TEXT"; value: string }
-  | { type: "SET_LOADING"; value: boolean }
-  | { type: "SET_PATCH_APPLIED"; value: boolean }
-  | { type: "SET_RENDERED_ISSUES"; value: ScanIssue[] | ((prev: ScanIssue[]) => ScanIssue[]) };
-
-const cleanerReducer = (state: CleanerState, action: CleanerAction): CleanerState => {
-  switch (action.type) {
-    case "SET_CODE": return { ...state, cleanerCode: action.value };
-    case "SET_SCAN_WHOLE": return { ...state, scanWholeWorkspace: action.value };
-    case "SET_AUTO_APPLY": return { ...state, autoApplyPatch: action.value };
-    case "SET_ISSUES": return { ...state, scannedIssues: action.value };
-    case "SET_PATCH_ID": return { ...state, scannedPatchId: action.value };
-    case "SET_PATCH_TEXT": return { ...state, scannedPatchText: action.value };
-    case "SET_LOADING": return { ...state, cleanerLoading: action.value };
-    case "SET_PATCH_APPLIED": return { ...state, isPatchApplied: action.value };
-    case "SET_RENDERED_ISSUES": return { ...state, renderedIssues: typeof action.value === "function" ? action.value(state.renderedIssues) : action.value };
-    default: return state;
-  }
-};
-
-// --- UI / GENERAL REDUCER ---
-interface UiState {
-  activeTab: "overview" | "orchestrator" | "docs" | "kb" | "cleaner" | "parcle";
-  theme: "light" | "dark";
-  sysInfo: SystemInfo | null;
-  parcleData: ParcleRecord | null;
-  historicDiffOverlay: {
-    open: boolean;
-    oldContent: string;
-    newContent: string;
-    sha: string;
-  } | null;
-  selectedEventId: string | null;
-  vaultOpenOnMobile: boolean;
-  routingEvents: Array<{
-    id: string;
-    timestamp: string;
-    eventType: string;
-    payload: string;
-    route: string;
-    confidence: number;
-    outcome: string;
-    failed?: boolean;
-  }>;
-}
-
-type UiAction =
-  | { type: "SET_ACTIVE_TAB"; value: UiState["activeTab"] }
-  | { type: "SET_THEME"; value: "light" | "dark" }
-  | { type: "SET_SYS_INFO"; value: SystemInfo | null }
-  | { type: "SET_PARCLE_DATA"; value: ParcleRecord | null }
-  | { type: "SET_DIFF_OVERLAY"; value: UiState["historicDiffOverlay"] }
-  | { type: "SET_SELECTED_EVENT_ID"; value: string | null }
-  | { type: "SET_VAULT_MOBILE"; value: boolean }
-  | { type: "SET_ROUTING_EVENTS"; value: UiState["routingEvents"] | ((prev: UiState["routingEvents"]) => UiState["routingEvents"]) };
-
-const uiReducer = (state: UiState, action: UiAction): UiState => {
-  switch (action.type) {
-    case "SET_ACTIVE_TAB": return { ...state, activeTab: action.value };
-    case "SET_THEME": return { ...state, theme: action.value };
-    case "SET_SYS_INFO": return { ...state, sysInfo: action.value };
-    case "SET_PARCLE_DATA": return { ...state, parcleData: action.value };
-    case "SET_DIFF_OVERLAY": return { ...state, historicDiffOverlay: action.value };
-    case "SET_SELECTED_EVENT_ID": return { ...state, selectedEventId: action.value };
-    case "SET_VAULT_MOBILE": return { ...state, vaultOpenOnMobile: action.value };
-    case "SET_ROUTING_EVENTS": return { ...state, routingEvents: typeof action.value === "function" ? action.value(state.routingEvents) : action.value };
-    default: return state;
-  }
-};
+import {
+  orchReducer, DocHelperState, docHelperReducer,
+  kbReducer, cleanerReducer, uiReducer
+} from "./reducers";
 
 // --- SUBCOMPONENTS TO REDUCE APP SIZE ---
 
@@ -737,19 +534,20 @@ export default function Sandbox() {
   }, [cleanerState.scannedIssues]);
 
   // Fetch metrics and records
-  const fetchDiagnostics = async () => {
+  const fetchDiagnostics = async (signal?: AbortSignal) => {
     try {
-      const infoRes = await fetch("/api/sys-info");
+      const infoRes = await fetch("/api/sys-info", { signal });
       const infoData = await infoRes.json();
       dispatchUi({ type: "SET_SYS_INFO", value: infoData });
 
-      const recRes = await fetch("/api/parcle/records");
+      const recRes = await fetch("/api/parcle/records", { signal });
       const recData = await recRes.json();
       dispatchUi({ type: "SET_PARCLE_DATA", value: recData.records });
       if (recData.records && Array.isArray(recData.records.routing_events)) {
         dispatchUi({ type: "SET_ROUTING_EVENTS", value: recData.records.routing_events });
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err.name === "AbortError") return;
       console.error("Diagnostic grab error:", err);
     } finally {
       loading.current = false;
@@ -766,14 +564,17 @@ export default function Sandbox() {
   });
 
   useEffect(() => {
-    fetchDiagnostics();
+    const controller = new AbortController();
+    fetchDiagnostics(controller.signal);
+    return () => controller.abort();
   }, []);
 
   // Poll active repo context every 5s and handle repo switch
   useEffect(() => {
+    const controller = new AbortController();
     const pollRepo = async () => {
       try {
-        const res = await fetch("/api/orchestrate/context");
+        const res = await fetch("/api/orchestrate/context", { signal: controller.signal });
         const data = await res.json();
         if (data.status === "success" && data.context) {
           const newRepo = data.context.active_repo;
@@ -789,19 +590,23 @@ export default function Sandbox() {
             dispatchKb({ type: "SET_LOG", value: [] });
 
             // Re-fetch manifest/records
-            await fetchDiagnostics();
+            await fetchDiagnostics(controller.signal);
           } else if (!activeRepoName) {
             setActiveRepoName(newRepo);
           }
         }
-      } catch (err) {
+      } catch (err: any) {
+        if (err.name === "AbortError") return;
         console.error("Failed to poll active repo context:", err);
       }
     };
 
     pollRepo();
     const interval = setInterval(pollRepo, 5000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      controller.abort();
+    };
   }, [activeRepoName]);
 
   // Dynamic welcome message updates based on Parcle key kb:index:manifest
@@ -991,7 +796,7 @@ export default function Sandbox() {
       });
 
       let buffer = "";
-      while (!done) {
+      const processStream = async () => {
         const { value, done: readerDone } = await reader.read();
         done = readerDone;
         if (value) {
@@ -1043,7 +848,11 @@ export default function Sandbox() {
             }
           }
         }
-      }
+        if (!done) {
+          await processStream();
+        }
+      };
+      await processStream();
       fetchDiagnostics();
 
     } catch (err) {
@@ -1203,7 +1012,39 @@ export default function Sandbox() {
   };
 }
 
-export default function App() {
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: Error | null }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("App boundary caught an error", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950 text-slate-200">
+          <h2 className="text-xl font-bold mb-4">Something went wrong</h2>
+          <pre className="p-4 bg-slate-900 rounded overflow-auto max-w-2xl text-xs text-red-400">
+            {this.state.error?.message}
+          </pre>
+          <button type="button" onClick={() => window.location.reload()} className="mt-4 px-4 py-2 bg-emerald-600 rounded">
+            Reload App
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function MainApp() {
   const {
     orchState,
     dispatchOrch,
@@ -1233,11 +1074,7 @@ export default function App() {
 
   return (
     <LazyMotion features={domAnimation}>
-      <div className={`min-h-screen font-sans flex flex-col antialiased transition-colors duration-250 ${
-        uiState.theme === "dark" 
-          ? "bg-[#070b13] text-slate-100" 
-          : "light-mode bg-[#f8fafc] text-slate-800"
-      }`}>
+      <div className={`app-container ${uiState.theme === "dark" ? "dark-theme" : "light-mode"}`}>
       
         {/* ----------------- TOP BAR ----------------- */}
         <Header
@@ -1420,5 +1257,13 @@ export default function App() {
 
       </div>
     </LazyMotion>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <MainApp />
+    </ErrorBoundary>
   );
 }

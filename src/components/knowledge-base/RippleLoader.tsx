@@ -1,9 +1,10 @@
 import React from "react";
 
+const statuses = ["scanning memory arrays...", "ranking chunks...", "compiling answer..."];
+
 const RippleLoader = () => {
   const [statusIdx, setStatusIdx] = React.useState(0);
   const [legToggle, setLegToggle] = React.useState(false);
-  const statuses = ["scanning memory arrays...", "ranking chunks...", "compiling answer..."];
 
   React.useEffect(() => {
     const interval = setInterval(() => {

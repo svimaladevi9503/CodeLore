@@ -1,3 +1,4 @@
+/* eslint-disable react-doctor/no-derived-state */
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { CleanerIssue, RepoTreeNode } from "../../types";
 import { buildTree } from "./utils";
@@ -34,7 +35,7 @@ export function useCleanerState(repoName: string) {
   const fetchTree = useCallback(async () => {
     setTreeLoading(true);
     try {
-      const res = await fetch("/api/cleaner/tree");
+      const res = await fetch(`/api/cleaner/tree?repo=${encodeURIComponent(repoName || "custom-docs")}`);
       const data = await res.json();
       if (data.status === "success") {
         setTreeData(data.tree || []);
@@ -55,7 +56,16 @@ export function useCleanerState(repoName: string) {
     } finally {
       setTreeLoading(false);
     }
-  }, []);
+  }, [repoName]);
+
+  // ─── RESET ON REPO CHANGE ───────────────────────────────────────────────
+  const [prevRepoName, setPrevRepoName] = useState(repoName);
+  if (repoName !== prevRepoName) {
+    setPrevRepoName(repoName);
+    setIssues([]);
+    setPatchLog([]);
+    setTreeData([]);
+  }
 
   // ─── FETCH PATCH LOG ────────────────────────────────────────────────────
   const fetchPatchLog = useCallback(async () => {

@@ -1,29 +1,29 @@
 import React from "react";
-import { Play, RefreshCw } from "lucide-react";
+import { Loader2, Play } from "lucide-react";
 
-export interface RunScanButtonProps {
+interface RunScanButtonProps {
   scanning: boolean;
-  disabled?: boolean;
+  disabled: boolean;
   onRunScan: () => void;
-  className?: string;
 }
 
-export function RunScanButton({ scanning, disabled, onRunScan, className = "" }: RunScanButtonProps) {
+export function RunScanButton({ scanning, disabled, onRunScan }: RunScanButtonProps) {
   return (
     <button
       type="button"
       onClick={onRunScan}
       disabled={scanning || disabled}
-      className={`bg-amber-500 hover:bg-amber-400 text-black font-sans font-medium text-[12px] py-2 px-5 rounded-lg cursor-pointer transition active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 ${className}`}
+      aria-label={scanning ? "Scanning" : "Run full scan"}
+      className="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-amber-950 text-[12px] font-sans font-medium rounded-lg transition-colors cursor-pointer shadow-sm"
     >
       {scanning ? (
         <>
-          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-          <span>Scanning...</span>
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-950" />
+          <span>Scanning codebase...</span>
         </>
       ) : (
         <>
-          <Play className="h-3.5 w-3.5" />
+          <Play className="h-3.5 w-3.5 fill-current" />
           <span>Run Full Scan</span>
         </>
       )}

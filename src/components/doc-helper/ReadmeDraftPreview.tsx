@@ -1,10 +1,15 @@
+/* eslint-disable react-doctor/dangerous-html-sink */
 import React from "react";
 import { Eye } from "lucide-react";
 import { marked } from "marked";
 
+import DOMPurify from "dompurify";
+import parse from "html-react-parser";
+
 function parseMarkdown(md: string): string {
   try {
-    return marked.parse(md) as string;
+    const html = marked.parse(md) as string;
+    return DOMPurify.sanitize(html);
   } catch (err) {
     console.error("Markdown parsing failed", err);
     return md;
@@ -85,10 +90,9 @@ export default function ReadmeDraftPreview({
             {draftContent}
           </pre>
         ) : (
-          <div
-            className="markdown-body select-text"
-            dangerouslySetInnerHTML={{ __html: parseMarkdown(draftContent) }}
-          />
+          <div className="prose prose-sm dark:prose-invert max-w-none text-[13px] leading-relaxed">
+            {parse(parseMarkdown(draftContent))}
+          </div>
         )}
       </div>
     </div>

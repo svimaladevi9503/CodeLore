@@ -7,6 +7,28 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
+.app-container {
+  min-height: 100vh;
+  font-family: var(--font-sans);
+  display: flex;
+  flex-direction: column;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 250ms;
+}
+
+.dark-theme {
+  background-color: #070b13;
+  color: #f1f5f9; /* text-slate-100 */
+}
+
+.light-mode.app-container {
+  background-color: #f8fafc;
+  color: #1e293b; /* text-slate-800 */
+}
+
 @keyframes pulse-dot {
   0%, 100% {
     transform: scale(1);

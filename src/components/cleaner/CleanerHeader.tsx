@@ -85,7 +85,7 @@ export function CleanerHeader({
         }`}>
           <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
           <span className="text-red-400 flex-1">{scanError}</span>
-          <button type="button" onClick={() => setScanError(null)} className="text-red-400 hover:text-red-300 cursor-pointer">
+          <button type="button" aria-label="Dismiss scan error" onClick={() => setScanError(null)} className="text-red-400 hover:text-red-300 cursor-pointer">
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -96,7 +96,7 @@ export function CleanerHeader({
         }`}>
           <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
           <span className="text-red-400 flex-1">{fixError}</span>
-          <button type="button" onClick={() => setFixError(null)} className="text-red-400 hover:text-red-300 cursor-pointer">
+          <button type="button" aria-label="Dismiss fix error" onClick={() => setFixError(null)} className="text-red-400 hover:text-red-300 cursor-pointer">
             <X className="h-3.5 w-3.5" />
           </button>
         </div>

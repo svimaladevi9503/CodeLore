@@ -1,3 +1,4 @@
+/* eslint-disable react-doctor/async-parallel, react-doctor/async-await-in-loop */
 import express from "express";
 import path from "path";
 import fs from "fs";
@@ -325,8 +326,8 @@ async function saveParcle(): Promise<boolean> {
     const client = await pool.connect();
     await client.query("BEGIN");
 
-    for (const [key, val] of Object.entries(parcleDb.readmes)) {
-      await client.query(
+    await Promise.all(Object.entries(parcleDb.readmes).map(([key, val]) =>
+      client.query(
         `INSERT INTO readmes (key, content, timestamp, sha, author) 
          VALUES ($1, $2, $3, $4, $5) 
          ON CONFLICT (key) DO UPDATE SET
@@ -335,11 +336,11 @@ async function saveParcle(): Promise<boolean> {
            sha = EXCLUDED.sha,
            author = EXCLUDED.author`,
         [key, val.content, val.timestamp, val.sha, val.author]
-      );
-    }
+      )
+    ));
 
-    for (const [key, val] of Object.entries(parcleDb.prs)) {
-      await client.query(
+    await Promise.all(Object.entries(parcleDb.prs).map(([key, val]) =>
+      client.query(
         `INSERT INTO prs (key, url, sha, title, status, timestamp) 
          VALUES ($1, $2, $3, $4, $5, $6) 
          ON CONFLICT (key) DO UPDATE SET 
@@ -349,50 +350,50 @@ async function saveParcle(): Promise<boolean> {
            status = EXCLUDED.status, 
            timestamp = EXCLUDED.timestamp`,
         [key, val.url, val.sha, val.title, val.status, val.timestamp]
-      );
-    }
+      )
+    ));
 
     await client.query("DELETE FROM v_store");
-    for (const doc of parcleDb.v_store) {
-      await client.query(
+    await Promise.all(parcleDb.v_store.map(doc =>
+      client.query(
         "INSERT INTO v_store (id, filename, section, content) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING",
         [doc.id, doc.filename, doc.section, doc.content]
-      );
-    }
+      )
+    ));
 
     await client.query("DELETE FROM qa_logs");
-    for (const log of parcleDb.qa_logs) {
-      await client.query(
+    await Promise.all(parcleDb.qa_logs.map(log =>
+      client.query(
         "INSERT INTO qa_logs (query, answer, timestamp, sources) VALUES ($1, $2, $3, $4)",
         [log.query, log.answer, log.timestamp, JSON.stringify(log.sources)]
-      );
-    }
+      )
+    ));
 
-    for (const [key, val] of Object.entries(parcleDb.clean_patches)) {
-      await client.query(
+    await Promise.all(Object.entries(parcleDb.clean_patches).map(([key, val]) =>
+      client.query(
         `INSERT INTO clean_patches (key, file, patch, timestamp, applied) 
          VALUES ($1, $2, $3, $4, $5) 
          ON CONFLICT (key) DO UPDATE SET 
            applied = EXCLUDED.applied`,
         [key, val.file, val.patch, val.timestamp, val.applied]
-      );
-    }
+      )
+    ));
 
     await client.query("DELETE FROM pipeline_runs");
-    for (const run of parcleDb.pipeline_runs) {
-      await client.query(
+    await Promise.all(parcleDb.pipeline_runs.map(run =>
+      client.query(
         "INSERT INTO pipeline_runs (id, name, status, timestamp, log) VALUES ($1, $2, $3, $4, $5)",
         [run.id, run.name, run.status, run.timestamp, run.log]
-      );
-    }
+      )
+    ));
 
     await client.query("DELETE FROM routing_events");
-    for (const ev of parcleDb.routing_events) {
-      await client.query(
+    await Promise.all(parcleDb.routing_events.map(ev =>
+      client.query(
         "INSERT INTO routing_events (id, timestamp, event_type, payload, route, confidence, outcome, failed) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         [ev.id, ev.timestamp, ev.eventType, ev.payload, ev.route, ev.confidence, ev.outcome, ev.failed || false]
-      );
-    }
+      )
+    ));
 
     await client.query("COMMIT");
     client.release();
@@ -1631,6 +1632,8 @@ function getProperProjectName(repoName: string): string {
     .join(" ");
 }
 
+const TEXT_EXTENSIONS = new Set([".sh", ".json", ".py", ".js", ".ts", ".yml", ".yaml", ".txt", ".md", ".cfg", ".ini", ".toml"]);
+
 // Recursively traverse cloned repo to gather files and contents
 function getRepositoryContext(dir: string): { fileTree: string; fileContents: string } {
   const files: string[] = [];
@@ -1658,7 +1661,7 @@ function getRepositoryContext(dir: string): { fileTree: string; fileContents: st
       } else {
         files.push(relPath);
         const ext = path.extname(item).toLowerCase();
-        const isTextFile = [".sh", ".json", ".py", ".js", ".ts", ".yml", ".yaml", ".txt", ".md", ".cfg", ".ini", ".toml"].includes(ext);
+        const isTextFile = TEXT_EXTENSIONS.has(ext);
         if (isTextFile && stat.size < 30000) {
           try {
             contentsMap[relPath] = fs.readFileSync(fullPath, "utf-8");

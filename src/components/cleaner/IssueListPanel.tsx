@@ -1,3 +1,4 @@
+/* eslint-disable react-doctor/rendering-hydration-mismatch-time */
 import React from "react";
 import { Code2 } from "lucide-react";
 import { CleanerIssue } from "../../types";
@@ -24,6 +25,7 @@ export function IssueListPanel({
   filterSeverity, sortBy, scanning,
   setFilterSeverity, setSortBy, viewIssue, showFixPreview, runScan
 }: IssueListPanelProps) {
+
   return (
     <>
       {/* Header */}

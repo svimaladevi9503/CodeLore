@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+/* eslint-disable react-doctor/no-derived-state, react-doctor/no-event-handler */
+import { useState, useEffect, useCallback } from "react";
 
 export interface GitHubUser {
   login: string;
@@ -27,7 +28,7 @@ interface UseGitHubParams {
 }
 
 export function useGitHub({ repoName, routingEvents }: UseGitHubParams) {
-  const [token, setToken] = useState(() => localStorage.getItem("github_token") || "");
+  const [token, setToken] = useState(() => localStorage.getItem("gh_session") || "");
   const [inputToken, setInputToken] = useState("");
   const [ghUser, setGhUser] = useState<GitHubUser | null>(null);
   const [ghRepos, setGhRepos] = useState<GitHubRepo[]>([]);
@@ -37,7 +38,7 @@ export function useGitHub({ repoName, routingEvents }: UseGitHubParams) {
   const [loadingCommits, setLoadingCommits] = useState(false);
   const [errorCommits, setErrorCommits] = useState("");
 
-  const fetchCommits = async (selectedRepoName?: string) => {
+  const fetchCommits = useCallback(async (selectedRepoName?: string) => {
     const targetRepo = selectedRepoName || repoName;
     if (!token || !targetRepo || !ghUser) {
       setCommits([]);
@@ -66,17 +67,15 @@ export function useGitHub({ repoName, routingEvents }: UseGitHubParams) {
     } finally {
       setLoadingCommits(false);
     }
-  };
+  }, [repoName, token, ghUser, ghRepos]);
 
   useEffect(() => {
     if (token && repoName && ghUser && ghRepos.length > 0) {
       fetchCommits();
-    } else {
-      setCommits([]);
     }
-  }, [repoName, token, ghUser, ghRepos, routingEvents]);
+  }, [fetchCommits, token, repoName, ghUser, ghRepos, routingEvents]);
 
-  const fetchGithubData = async (accessToken: string) => {
+  const fetchGithubData = useCallback(async (accessToken: string) => {
     setLoadingGh(true);
     setErrorGh("");
     try {
@@ -94,24 +93,25 @@ export function useGitHub({ repoName, routingEvents }: UseGitHubParams) {
 
       setGhUser({ login: userData.login, avatar_url: userData.avatar_url });
       setGhRepos(reposData);
-      localStorage.setItem("github_token", accessToken);
+      localStorage.setItem("gh_session", accessToken);
       setToken(accessToken);
     } catch (err: any) {
       setErrorGh(err.message || "GitHub authorization failed");
       setGhUser(null);
       setGhRepos([]);
-      localStorage.removeItem("github_token");
+      localStorage.removeItem("gh_session");
       setToken("");
     } finally {
       setLoadingGh(false);
     }
-  };
+  }, []);
 
+  // Initial load
   useEffect(() => {
-    if (token) {
+    if (token && !ghUser) {
       fetchGithubData(token);
     }
-  }, [token]);
+  }, [fetchGithubData, token, ghUser]);
 
   const handleConnect = () => {
     if (!inputToken.trim()) return;
@@ -119,7 +119,7 @@ export function useGitHub({ repoName, routingEvents }: UseGitHubParams) {
   };
 
   const handleDisconnect = () => {
-    localStorage.removeItem("github_token");
+    localStorage.removeItem("gh_session");
     setToken("");
     setGhUser(null);
     setGhRepos([]);

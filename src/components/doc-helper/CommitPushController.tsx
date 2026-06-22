@@ -34,6 +34,7 @@ export default function CommitPushController({
           </span>
           <input
             type="text"
+            aria-label="Commit message"
             placeholder="Commit message..."
             value={commitMessage}
             onChange={(e) => setCommitMessage(e.target.value)}

@@ -79,6 +79,7 @@ export default function KnowledgeBaseView({
             <div className="bg-teal-600/90 backdrop-blur-xs text-white px-4 py-2 text-[12px] flex items-center justify-between border-b border-teal-500/30 z-20 shrink-0 select-none animate-fade-in">
               <span className="font-sans font-medium">Repo switched to {switchBanner.repoName}. Refreshing knowledge...</span>
               <button
+                type="button"
                 onClick={() => setSwitchBanner && setSwitchBanner({ show: false, repoName: "" })}
                 className="text-teal-200 hover:text-white p-1 rounded transition"
               >
