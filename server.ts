@@ -1352,16 +1352,200 @@ app.get("/api/github/callback", async (req, res) => {
 
     res.send(`
       <!DOCTYPE html>
-      <html>
-        <head><title>GitHub Authentication Success</title></head>
-        <body style="background:#090d16;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;">
-          <div style="text-align:center;">
-            <p style="font-size:14px;margin-bottom:8px;">Authentication successful!</p>
-            <p style="font-size:12px;color:#64748b;">Closing flow context...</p>
+      <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>GitHub Authentication Success</title>
+          <link rel="preconnect" href="https://fonts.googleapis.com">
+          <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+          <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+          <style>
+            * {
+              box-sizing: border-box;
+              margin: 0;
+              padding: 0;
+            }
+            body {
+              background: radial-gradient(circle at center, #0e1726 0%, #050b14 100%);
+              color: #f8fafc;
+              font-family: 'Plus Jakarta Sans', sans-serif;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              height: 100vh;
+              overflow: hidden;
+            }
+            .container {
+              position: relative;
+              width: 100%;
+              max-width: 420px;
+              padding: 40px 32px;
+              border-radius: 24px;
+              background: rgba(13, 21, 39, 0.45);
+              backdrop-filter: blur(20px);
+              -webkit-backdrop-filter: blur(20px);
+              border: 1px solid rgba(255, 255, 255, 0.08);
+              box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+              text-align: center;
+              animation: slideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            }
+            @keyframes slideUp {
+              from {
+                opacity: 0;
+                transform: translateY(20px);
+              }
+              to {
+                opacity: 1;
+                transform: translateY(0);
+              }
+            }
+            .icon-wrapper {
+              position: relative;
+              display: inline-flex;
+              justify-content: center;
+              align-items: center;
+              width: 80px;
+              height: 80px;
+              margin-bottom: 24px;
+            }
+            .glow-ring {
+              position: absolute;
+              width: 100%;
+              height: 100%;
+              border-radius: 50%;
+              border: 2px solid rgba(16, 185, 129, 0.2);
+              animation: pulseRing 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+            }
+            @keyframes pulseRing {
+              0% {
+                transform: scale(0.95);
+                opacity: 1;
+              }
+              50% {
+                transform: scale(1.15);
+                opacity: 0.5;
+              }
+              100% {
+                transform: scale(1.3);
+                opacity: 0;
+              }
+            }
+            .icon-circle {
+              width: 72px;
+              height: 72px;
+              border-radius: 50%;
+              background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              box-shadow: 0 8px 24px rgba(16, 185, 129, 0.3);
+            }
+            .icon-circle svg {
+              width: 36px;
+              height: 36px;
+              color: white;
+              stroke-dasharray: 50;
+              stroke-dashoffset: 50;
+              animation: drawCheck 0.6s 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+            }
+            @keyframes drawCheck {
+              to {
+                stroke-dashoffset: 0;
+              }
+            }
+            h1 {
+              font-size: 22px;
+              font-weight: 700;
+              margin-bottom: 12px;
+              letter-spacing: -0.02em;
+              background: linear-gradient(120deg, #ffffff 0%, #cbd5e1 100%);
+              -webkit-background-clip: text;
+              -webkit-text-fill-color: transparent;
+            }
+            p {
+              font-size: 14px;
+              color: #94a3b8;
+              line-height: 1.6;
+              margin-bottom: 32px;
+            }
+            .progress-bar-container {
+              width: 100%;
+              height: 4px;
+              background: rgba(255, 255, 255, 0.05);
+              border-radius: 2px;
+              overflow: hidden;
+              position: relative;
+            }
+            .progress-bar {
+              height: 100%;
+              width: 0%;
+              background: linear-gradient(90deg, #10b981, #34d399);
+              border-radius: 2px;
+              animation: fillProgress 2s linear forwards;
+            }
+            @keyframes fillProgress {
+              to {
+                width: 100%;
+              }
+            }
+            .redirect-label {
+              font-size: 11px;
+              font-weight: 600;
+              text-transform: uppercase;
+              letter-spacing: 0.1em;
+              margin-top: 12px;
+              display: block;
+            }
+            @media (prefers-color-scheme: light) {
+              body {
+                background: radial-gradient(circle at center, #f8fafc 0%, #e2e8f0 100%);
+                color: #0f172a;
+              }
+              .container {
+                background: rgba(255, 255, 255, 0.7);
+                border: 1px solid rgba(0, 0, 0, 0.08);
+                box-shadow: 0 20px 50px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+              }
+              h1 {
+                background: linear-gradient(120deg, #0f172a 0%, #334155 100%);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+              }
+              p {
+                color: #475569;
+              }
+              .progress-bar-container {
+                background: rgba(0, 0, 0, 0.05);
+              }
+              .redirect-label {
+                color: #94a3b8;
+              }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="icon-wrapper">
+              <div class="glow-ring"></div>
+              <div class="icon-circle">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+            </div>
+            <h1>Authentication Successful!</h1>
+            <p>GitHub account successfully linked. Returning to CodeLore workspace.</p>
+            <div class="progress-bar-container">
+              <div class="progress-bar"></div>
+            </div>
+            <span class="redirect-label">Redirecting in a moment</span>
           </div>
           <script>
             localStorage.setItem("github_token", "${accessToken}");
-            window.location.href = "/";
+            setTimeout(() => {
+              window.location.href = "/";
+            }, 2000);
           </script>
         </body>
       </html>
