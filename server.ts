@@ -2859,7 +2859,9 @@ app.get("/api/github/login", (req, res) => {
   if (!clientId) {
     return res.status(500).send("GITHUB_CLIENT_ID is not configured in the environment.");
   }
-  const appUrl = process.env.APP_URL || `http://localhost:${PORT}`;
+  const host = req.get("host");
+  const protocol = req.headers["x-forwarded-proto"] || req.protocol;
+  const appUrl = process.env.APP_URL || `${protocol}://${host}`;
   const redirectUri = `${appUrl}/api/github/callback`;
   const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=repo%20user`;
   res.redirect(githubAuthUrl);

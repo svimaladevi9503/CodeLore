@@ -65,6 +65,7 @@ function UnauthGitHubIntegration({
         <div className="flex flex-col sm:flex-row gap-3">
           <a
             href="/api/github/login"
+            target="_top"
             className={`px-4 py-2.5 rounded-lg font-sans text-[12px] font-medium cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 transition w-full sm:w-auto shadow-sm border ${
               theme === "dark" ? "bg-slate-900 border-purple-500/80 hover:bg-slate-850 text-purple-300" : "bg-white border-purple-500/80 hover:bg-purple-50/50 text-purple-700"
             }`}
