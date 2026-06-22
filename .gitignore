@@ -7,3 +7,4 @@ coverage/
 .env*
 !.env.example
 TODO.md
+to-do.txt

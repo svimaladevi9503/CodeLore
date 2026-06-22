@@ -1599,45 +1599,27 @@ app.get("/api/readme/logo", (req, res) => {
   }
 });
 
-// Fallback project logo SVG generator
-function getFallbackSvgLogo(projectName: string): string {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+// Beautiful CodeLore SVG logo generator
+function getCodeLoreLogo(): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 120" width="400" height="120">
     <defs>
       <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" style="stop-color:#3B82F6;stop-opacity:1" />
+        <stop offset="0%" style="stop-color:#FF4B4B;stop-opacity:1" />
         <stop offset="100%" style="stop-color:#8B5CF6;stop-opacity:1" />
       </linearGradient>
     </defs>
-    <rect width="100%" height="100%" rx="40" fill="#0F172A"/>
-    <circle cx="100" cy="90" r="50" fill="url(#grad)" opacity="0.85"/>
-    <text x="100" y="160" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="bold" fill="#F8FAFC" text-anchor="middle">${projectName}</text>
+    <rect width="100%" height="100%" rx="20" fill="#0F172A"/>
+    <g transform="translate(30, 25)">
+      <!-- Beautiful CodeLore Logo Mark -->
+      <path d="M 0 35 L 20 15 L 40 35 L 20 55 Z" fill="none" stroke="url(#grad)" stroke-width="4" stroke-linejoin="round"/>
+      <path d="M 12 35 L 20 27 L 28 35 L 20 43 Z" fill="url(#grad)"/>
+      <circle cx="20" cy="35" r="3" fill="#F8FAFC"/>
+    </g>
+    <!-- Text Elements -->
+    <text x="100" y="62" font-family="system-ui, -apple-system, sans-serif" font-size="32" font-weight="800" fill="#F8FAFC" letter-spacing="1.5">CodeLore</text>
+    <text x="100" y="85" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="600" fill="#94A3B8" letter-spacing="3">AI DOCUMENTATION ENGINE</text>
   </svg>`;
   return Buffer.from(svg).toString("base64");
-}
-
-// Generate project logo image using Gemini Imagen API
-async function generateLogoImage(projectName: string): Promise<string> {
-  const ai = getAI();
-  if (!ai) {
-    return getFallbackSvgLogo(projectName);
-  }
-  try {
-    const response = await ai.models.generateImages({
-      model: "imagen-3.0-generate-002",
-      prompt: `A beautiful and modern minimalist flat logo for a software project named "${projectName}". High-quality, clean vector graphic icon, dark mode friendly, creative, tech brand logo design, 1:1 aspect ratio, no text other than the name "${projectName}".`,
-      config: {
-        numberOfImages: 1,
-        outputMimeType: "image/png",
-        aspectRatio: "1:1",
-      },
-    });
-    if (response?.generatedImages?.[0]?.image?.imageBytes) {
-      return response.generatedImages[0].image.imageBytes;
-    }
-  } catch (err) {
-    console.error("Gemini image generation failed:", err);
-  }
-  return getFallbackSvgLogo(projectName);
 }
 
 // Format repository name to proper project name
@@ -1733,17 +1715,9 @@ app.post("/api/readme/generate", async (req, res) => {
 
     const content = fs.readFileSync(genPath, "utf-8");
     
-    // Step 1: Generate project logo image and cache it
-    const properProjectName = getProperProjectName(repoName || repo.split("/")[1]);
-    let logoBase64 = "";
-    try {
-      logoBase64 = await generateLogoImage(properProjectName);
-      if (logoBase64) {
-        generatedLogos.set(repo, logoBase64);
-      }
-    } catch (logoErr) {
-      console.error("Logo generation failed:", logoErr);
-    }
+    // Step 1: Cache static CodeLore logo image
+    const logoBase64 = getCodeLoreLogo();
+    generatedLogos.set(repo, logoBase64);
 
     // Step 2: Post-process generated README using Gemini and repository files context
     const ai = getAI();
