@@ -82,10 +82,16 @@ export default function OrchestratorView({
       setCommits([]);
       return;
     }
+
+    const selected = ghRepos.find(r => r.name === targetRepo);
+    if (!selected && ghRepos.length > 0) {
+      setCommits([]);
+      return;
+    }
+
     setLoadingCommits(true);
     setErrorCommits("");
     try {
-      const selected = ghRepos.find(r => r.name === targetRepo);
       const fullName = selected ? selected.full_name : `${ghUser.login}/${targetRepo}`;
       const res = await fetch(`https://api.github.com/repos/${fullName}/commits?per_page=15`, {
         headers: { Authorization: `token ${token}` }
