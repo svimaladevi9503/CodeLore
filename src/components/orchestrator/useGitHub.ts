@@ -76,30 +76,44 @@ export function useGitHub({ repoName, routingEvents }: UseGitHubParams) {
   }, [fetchCommits, token, repoName, ghUser, ghRepos, routingEvents]);
 
   const fetchGithubData = useCallback(async (accessToken: string) => {
+    console.log("[useGitHub] fetchGithubData started, token length:", accessToken?.length);
     setLoadingGh(true);
     setErrorGh("");
     try {
+      console.log("[useGitHub] Fetching user info from GitHub API...");
       const userRes = await fetch("https://api.github.com/user", {
         headers: { Authorization: `token ${accessToken}` },
       });
-      if (!userRes.ok) throw new Error("Invalid GitHub token");
+      if (!userRes.ok) {
+        console.error("[useGitHub] User API returned non-OK status:", userRes.status);
+        throw new Error("Invalid GitHub token");
+      }
       const userData = await userRes.json();
+      console.log("[useGitHub] Successfully authenticated user:", userData.login);
 
+      console.log("[useGitHub] Fetching repos list from GitHub API...");
       const reposRes = await fetch("https://api.github.com/user/repos?sort=updated&per_page=100", {
         headers: { Authorization: `token ${accessToken}` },
       });
-      if (!reposRes.ok) throw new Error("Failed to fetch repositories");
+      if (!reposRes.ok) {
+        console.error("[useGitHub] Repos API returned non-OK status:", reposRes.status);
+        throw new Error("Failed to fetch repositories");
+      }
       const reposData = await reposRes.json();
+      console.log("[useGitHub] Successfully loaded repos count:", reposData?.length);
 
       setGhUser({ login: userData.login, avatar_url: userData.avatar_url });
       setGhRepos(reposData);
       localStorage.setItem("gh_session", accessToken);
+      localStorage.setItem("github_token", accessToken);
       setToken(accessToken);
     } catch (err: any) {
+      console.error("[useGitHub] Authentication flow failed:", err);
       setErrorGh(err.message || "GitHub authorization failed");
       setGhUser(null);
       setGhRepos([]);
       localStorage.removeItem("gh_session");
+      localStorage.removeItem("github_token");
       setToken("");
     } finally {
       setLoadingGh(false);

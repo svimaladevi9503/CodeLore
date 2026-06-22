@@ -3097,6 +3097,7 @@ app.get("/api/github/callback", async (req, res) => {
             <span class="redirect-label">Redirecting in a moment</span>
           </div>
           <script>
+            localStorage.setItem("gh_session", "${accessToken}");
             localStorage.setItem("github_token", "${accessToken}");
             setTimeout(() => {
               window.location.href = "/";
